@@ -1,0 +1,377 @@
+{
+  "version": 1,
+  "notes": "Regression fixtures for the cleanup-LLM contract. `match: exact` fixtures must render byte-for-byte (after trailing-whitespace trim). `match: criteria` fixtures assert properties of the output. These fixtures double as few-shot examples for the cleanup prompt.",
+  "fixtures": [
+    {
+      "id": "signature-grocery-list",
+      "category": "list-detection",
+      "description": "THE signature test from the spec: spoken numbered list forms a real list AND prose resumes after it.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "so before we get groceries let me note from the store I need one milk two eggs three bread and then after that we can head home and start cooking dinner",
+      "match": "exact",
+      "expected": "So before we get groceries, let me note. From the store I need:\n1. Milk\n2. Eggs\n3. Bread\n\nAnd then after that, we can head home and start cooking dinner."
+    },
+    {
+      "id": "ordinals-todo-list",
+      "category": "list-detection",
+      "description": "Ordinals (first/second/third) trigger a numbered list; prose resumes.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "okay for tomorrow there are three things first email the landlord about the heater second renew the car registration third book the dentist appointment and once all that is done I can finally relax",
+      "match": "criteria",
+      "criteria": {
+        "mustMatch": [
+          "1\\. .*[Ee]mail the landlord",
+          "2\\. .*[Rr]enew the car registration",
+          "3\\. .*[Bb]ook the dentist"
+        ],
+        "mustNotMatch": [
+          "4\\."
+        ],
+        "mustContain": [
+          "relax"
+        ],
+        "listMustTerminate": true
+      }
+    },
+    {
+      "id": "bullet-list",
+      "category": "list-detection",
+      "description": "Saying 'bullet' / 'next item' without ordinals produces a bulleted list.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "notes for the meeting bullet ship the beta on friday next item marketing wants new screenshots next item the login bug is still open that's everything I had",
+      "match": "criteria",
+      "criteria": {
+        "mustMatch": [
+          "^[-•] .*[Ss]hip the beta",
+          "^[-•] .*screenshots",
+          "^[-•] .*login bug"
+        ],
+        "mustNotContain": [
+          "bullet",
+          "next item"
+        ],
+        "mustContain": [
+          "everything I had"
+        ],
+        "listMustTerminate": true
+      }
+    },
+    {
+      "id": "filler-heavy",
+      "category": "filler-removal",
+      "description": "Filler words removed; meaning fully intact; grammatical sentences out.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "um so basically I was you know thinking that we could uh maybe move the launch to like next month because um the testing isn't you know finished yet and I mean the team is sort of stretched thin",
+      "match": "criteria",
+      "criteria": {
+        "mustNotMatch": [
+          "\\bum\\b",
+          "\\buh\\b",
+          "\\byou know\\b",
+          "\\bI mean\\b",
+          "\\bsort of\\b",
+          "\\bbasically\\b"
+        ],
+        "mustContain": [
+          "launch",
+          "next month",
+          "testing",
+          "stretched thin"
+        ],
+        "startsCapitalized": true,
+        "endsWithTerminalPunctuation": true
+      }
+    },
+    {
+      "id": "backtrack-actually",
+      "category": "backtrack",
+      "description": "Self-correction with 'actually': only the corrected version survives.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "let's schedule the call for 2 pm actually make that 3 pm because I have a conflict earlier",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "3 pm"
+        ],
+        "mustNotContain": [
+          "2 pm",
+          "actually"
+        ],
+        "mustMatch": [
+          "conflict"
+        ]
+      }
+    },
+    {
+      "id": "backtrack-scratch-that",
+      "category": "backtrack",
+      "description": "'scratch that' removes the immediately preceding statement.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "tell the client we'll deliver on monday scratch that tell them we'll deliver on wednesday after the final review",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "Wednesday"
+        ],
+        "mustNotMatch": [
+          "[Mm]onday",
+          "scratch that"
+        ],
+        "mustContain2": [
+          "final review"
+        ]
+      }
+    },
+    {
+      "id": "legit-actually-like",
+      "category": "backtrack",
+      "description": "MUST NOT over-trigger: meaningful 'actually' and 'like' are preserved.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "I actually enjoyed the workshop more than I expected the texture of the clay felt like wet concrete but in a good way",
+      "match": "criteria",
+      "criteria": {
+        "mustMatch": [
+          "actually enjoyed",
+          "like wet concrete"
+        ],
+        "mustContain": [
+          "workshop"
+        ]
+      }
+    },
+    {
+      "id": "spoken-punctuation",
+      "category": "punctuation",
+      "description": "Spoken punctuation words become punctuation; 'new paragraph' splits paragraphs.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "dear team comma the deadline has moved period new paragraph please update your estimates by friday period",
+      "match": "criteria",
+      "criteria": {
+        "mustMatch": [
+          "[Dd]ear team,",
+          "moved\\.",
+          "\\n\\n",
+          "[Ff]riday\\."
+        ],
+        "mustNotMatch": [
+          "\\bcomma\\b",
+          "\\bperiod\\b",
+          "new paragraph"
+        ]
+      }
+    },
+    {
+      "id": "dictionary-enforcement",
+      "category": "dictionary",
+      "description": "Invented words are spelled/capitalized exactly as the dictionary defines, even when the transcript mangles them.",
+      "style": "professional",
+      "dictionary": [
+        {
+          "term": "Tide of Fortune",
+          "hint": "a game the speaker created; always title case"
+        },
+        {
+          "term": "Glimwick",
+          "hint": "an invented character name; capital G, ends in wick"
+        }
+      ],
+      "input": "yesterday I added a new character to tide of fortune his name is glimwik and he runs the harbor shop",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "Tide of Fortune",
+          "Glimwick"
+        ],
+        "mustNotContain": [
+          "tide of fortune",
+          "glimwik",
+          "Glimwik"
+        ],
+        "mustContain2": [
+          "harbor shop"
+        ]
+      }
+    },
+    {
+      "id": "multi-paragraph",
+      "category": "structure",
+      "description": "Long rambling monologue is broken into coherent paragraphs at topic shifts.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "the quarterly numbers came in better than expected revenue is up about twelve percent and churn is flat which is honestly a relief switching topics completely my flight for the conference lands wednesday night so I'll miss the morning session but I can join the afternoon workshops",
+      "match": "criteria",
+      "criteria": {
+        "mustMatch": [
+          "\\n\\n"
+        ],
+        "mustContain": [
+          "twelve percent",
+          "conference"
+        ],
+        "minParagraphs": 2
+      }
+    },
+    {
+      "id": "messaging-casual-style",
+      "category": "style",
+      "description": "Messaging style: casual, no stiff formality; trailing period on final short message dropped.",
+      "style": "messaging",
+      "dictionary": [],
+      "input": "hey um are we still on for lunch tomorrow I was thinking that new ramen place",
+      "match": "criteria",
+      "criteria": {
+        "mustNotMatch": [
+          "\\bum\\b"
+        ],
+        "mustContain": [
+          "ramen"
+        ],
+        "maxLength": 120,
+        "noTrailingPeriod": true
+      }
+    },
+    {
+      "id": "false-start-restatement",
+      "category": "backtrack",
+      "description": "A false start that is restated is dropped; only the completed thought remains.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "so I went to the I drove over to the hardware store to pick up the paint we ordered",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "drove",
+          "hardware store",
+          "paint"
+        ],
+        "mustNotMatch": [
+          "went to the I drove",
+          "I went to the[^\\w]"
+        ]
+      }
+    },
+    {
+      "id": "mixed-list-prose-long",
+      "category": "list-detection",
+      "description": "Prose → list → prose → second list → prose. Both lists form and both terminate.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "quick brain dump about the move we still need to handle utilities one cancel the internet two transfer the electric three forward the mail and the truck is booked for saturday morning for packing supplies I need bullet boxes next item packing tape next item bubble wrap then once the truck is loaded we grab lunch on the road",
+      "match": "criteria",
+      "criteria": {
+        "mustMatch": [
+          "1\\. .*[Cc]ancel the internet",
+          "2\\. .*[Tt]ransfer the electric",
+          "3\\. .*[Ff]orward the mail",
+          "^[-•] .*[Bb]oxes",
+          "^[-•] .*tape",
+          "^[-•] .*[Bb]ubble wrap"
+        ],
+        "mustContain": [
+          "Saturday",
+          "lunch"
+        ],
+        "mustNotMatch": [
+          "4\\."
+        ],
+        "listMustTerminate": true
+      }
+    },
+    {
+      "id": "never-invent",
+      "category": "fidelity",
+      "description": "Cleanup must not add facts, names, dates, or content that was not spoken.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "remind me to send the invoice",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "invoice"
+        ],
+        "maxLength": 60,
+        "mustNotMatch": [
+          "[Mm]onday|[Tt]uesday|[Ww]ednesday|[Tt]hursday|[Ff]riday|\\$|\\d{2,}"
+        ]
+      }
+    },
+    {
+      "id": "spoken-commas-mid-sentence",
+      "category": "punctuation",
+      "description": "Saying comma mid-sentence produces the character, never the word (user-reported).",
+      "style": "professional",
+      "dictionary": [],
+      "input": "I was tired comma running a lot comma and eating not a lot of food",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "tired,",
+          "a lot,"
+        ],
+        "mustNotMatch": [
+          "\b[Cc]omma\b"
+        ],
+        "startsCapitalized": true
+      }
+    },
+    {
+      "id": "dictionary-shorthand-expands",
+      "category": "dictionary",
+      "description": "A spoken shorthand (hint) expands to the full dictionary phrase.",
+      "style": "casual",
+      "dictionary": [
+        {
+          "term": "Tide of Fortune",
+          "hint": "ToF"
+        }
+      ],
+      "input": "i added a new wave effect to tof today and it looks great",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "Tide of Fortune"
+        ],
+        "mustNotMatch": [
+          "\b[Tt][Oo][Ff]\b"
+        ],
+        "startsCapitalized": true
+      }
+    },
+    {
+      "id": "abandoned-naming-clause",
+      "category": "backtrack",
+      "description": "An unfinished naming clause (place called ___ never named) is removed; real backtracks still resolve.",
+      "style": "professional",
+      "dictionary": [],
+      "input": "today was a weird day first I went to the store called Bob's Playground after that I went to a place called uh what's it called oh yeah I came back home and uh played some Xbox wait no I didn't play Xbox I played on Steam and I played Geometry Dash and then uh I was hungry so I went out and got some uh ice cream wait no it wasn't ice cream it was grapes",
+      "match": "criteria",
+      "criteria": {
+        "mustContain": [
+          "Playground",
+          "Steam",
+          "Geometry Dash",
+          "grapes"
+        ],
+        "mustNotContain": [
+          "Xbox",
+          "ice cream",
+          "what's it called",
+          "a place called"
+        ],
+        "mustNotMatch": [
+          "\b[Uu][Hh]\b",
+          "\b[Uu][Mm]\b"
+        ],
+        "startsCapitalized": true
+      }
+    }
+  ]
+}

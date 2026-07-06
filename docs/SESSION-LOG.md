@@ -1,0 +1,34 @@
+# Session log — SCRIBE build (2026-07-03 → 2026-07-04)
+
+Compact record of the Claude Code session that built Scribe, so any future session (or graph query) can recover the full story without the chat transcript.
+
+## Arc
+1. User supplied a complete build-spec (`BUILD-SPEC.md`) for a free, private Wispr Flow replacement. Machine scan drove the execution plan (`EXECUTION-PLAN.md`): no Rust/MSVC/Python → Electron + prebuilt binaries; RTX 3060 + 16 GB → mid/high tier local models.
+2. An Ultraplan cloud-refinement handoff was attempted; it required a git repo, which is why the project repo was created and the docs committed before any code.
+3. Built in the spec's gated phases 0–7, committing at every gate. All 8 phases closed in one session.
+
+## What happened per phase (with the failures that mattered)
+- **P0 scaffold**: electron-vite + React TS-strict + Tailwind; state machine; frameless overlay; uiohook hold-to-talk; SQLite. *Gotcha:* better-sqlite3 npm prebuild targets Node ABI 137, Electron 38 needs 139 → fixed by `prebuild-install --runtime=electron` wired into `postinstall`. The 14-fixture cleanup suite was written before any pipeline code, per spec.
+- **P1 STT**: whisper.cpp v1.9.1 prebuilt CUDA build as a sidecar process. JFK sample: perfect transcript in 1.8 s. End-to-end proven without a human: SAPI TTS → pipeline → SendInput paste landed in Notepad.
+- **P2 cleanup (the product)**: Ollama installed `/VERYSILENT`; first model choice **qwen3:4b failed hard** — hybrid thinking generated 2,000+ CoT tokens per request (~50 s) even with `think:false` + `/no_think`, sometimes leaking reasoning into content ending in `\boxed{}`. **Switch to `qwen3:4b-instruct`** (non-thinking): 0.3–1.3 s per cleanup. Three stubborn model quirks were fixed deterministically in code, not by prompt whack-a-mole: list markers "One:" → `1.` (`normalizeListMarkers`), messaging trailing period stripped (`applyStyleRules`), think-tag/boxed rescue (`sanitizeModelOutput`). Gate: **14/14 live fixtures in ~10 s**, signature grocery test byte-exact.
+- **P3 dictionary**: whisper `--prompt` biasing + prompt enforcement (live fixture) + auto-learn from History edits (`extractCorrections`, anchor-aligned token diff with Levenshtein gate).
+- **P4 UI**: overlay states, canvas level bars, tray, main window (Home/Dictionary/History/Settings), first-run setup checklist that detects mic/engine/models/Ollama and self-heals.
+- **P5 privacy**: default 100 % local (localhost-only endpoints); BYOK Groq/Gemini text-only cloud, opt-in, per-use overlay notice; delete-all-data. No account at all — most private reading of "account-optional".
+- **P6 mobile**: native apps infeasible on this machine → **LAN bridge**: token-protected local HTTP server + self-contained phone page; phone records, PC's models process. Verified with curl (401 without token, dictation JSON with).
+- **P7 packaging**: first-run benchmark auto-tiers device (thresholds widened after a contention-induced flap downgraded a 3060 to base.en); NSIS installer (98 MB) built and smoke-tested — packaged app correctly showed the setup checklist with CPU engine + model download.
+- **Graphify**: 292 nodes / 431 edges / 21 communities at `graphify-out/`.
+
+## Facts future sessions will want
+- Cleanup model is **qwen3:4b-instruct** — never "qwen3:4b" (thinking variant, 40× slower). Ollama at `%LOCALAPPDATA%\Programs\Ollama`.
+- Live suite: `npm run test:live` (needs Ollama up). Offline: `npm test`. Dev hooks: `SCRIBE_TEST_WAV=<wav>` feeds the pipeline directly; `SCRIBE_TEST_BRIDGE=1` forces the bridge with token `test-token`; `SCRIBE_REBENCH=1` re-runs the device benchmark.
+- whisper builds live in `resources/whisper/{cuda,cpu}/Release/whisper-cli.exe`; models in `models/ggml-*.bin` (dev) or `userData/models` (packaged).
+- User context: they hit Wispr Flow's 2,000-words/week cap (visible in a screenshot mid-session); Flow reference UX is documented in `WISPR-FLOW-REFERENCE.md`.
+- Still pending from the user: a real-mic 5-minute one-take test; UI pixel-polish against the Flow screenshots.
+
+## v0.2.x — the user-feedback rounds (2026-07-05)
+Real-world use surfaced what the lab test could not:
+- **v0.2.0**: microphone picker (the user's keyboard has no Right Ctrl; rebinding worked but exposed that no mic selector existed), toggle-knob fix (missing left anchor), Ollama model dropdown, firewall-block detection with one-click elevated repair, dictionary shorthands ("ToF" -> "Tide of Fortune") enforced in prompt + deterministic post-step + whisper glossary, Your Data page (readable view organized by the local model + read-only raw JSON), dark-only Wispr-grade UI with an inline SVG icon set. 16/16 live fixtures.
+- **v0.2.1**: the "nothing happens" bug was a mode mismatch (hold combo saved while toggle mode active). Added truthful hotkey diagnostics: armed/failed status panel + live "last press detected" line, mic check level meter, system-default mic name, second-instance now surfaces the window. Verified end-to-end by synthesizing Ctrl+Win and screen-capturing the Listening pill.
+- **v0.2.2**: polish pass — mic failures now surface as overlay errors (was eternal Listening), quick-tap start/stop race fixed, raw-transcript fallbacks and the cloud path get the same deterministic post-processing as local cleanup, API-key field no longer drops keystrokes, 10-minute runaway-recording cap for toggle mode, tray gains Start/stop dictation, README gains real screenshots.
+- **v0.2.3 — THE microphone fix (root cause found)**: dictation had never actually captured audio — history was always empty. The overlay showed "Listening…" but the mic never opened; the silent-failure was masked until v0.2.2 surfaced errors. Real error (logged to userData/mic-error.log): `AbortError: Unable to load a worklet's module`. Cause: the `Recorder` loaded its AudioWorklet processor from a `blob:` URL, which a packaged Electron app blocks. Fixes: (1) replaced the AudioWorklet with a `ScriptProcessorNode` (no module load, works everywhere), (2) moved capture from the frameless/non-focusable overlay into the main window, (3) added a `setPermissionRequestHandler`/`setPermissionCheckHandler` granting media, (4) resume a suspended AudioContext. Verified end-to-end: TTS speech → whisper transcript → cleanup produced the signature numbered list. Mic capture confirmed working via synthetic hold (clean "Listening…", no error).
+- **v0.2.4 — cloud double-check + speed**: cloud is now a SECOND pass, not a replacement — local cleanup always runs first, then (if enabled) a stronger cloud model proofreads the local result and fixes only what it missed, time-boxed to 8 s, keeping the local text on any timeout/error. Local cleanup timeout cut 120 s → 30 s; the cleanup model is warmed into VRAM on launch (keep_alive 30m) so the first dictation isn't slow. Warm end-to-end ~9 s (cold ~15 s), within the 5-10 s target.

@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+release/
+resources/whisper/
+models/
+*.log
+.DS_Store
+*.local
+temp/
+
+docs/reference-screenshots/
+graphify-out/
+*.tsbuildinfo

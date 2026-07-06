@@ -1,0 +1,24 @@
+@import 'tailwindcss';
+
+/* Scribe is dark by design (never white mode): dark: variants activate via
+   the .dark class on the main window root, not the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  font-family:
+    'Segoe UI Variable Text',
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+}
+
+/* The overlay window is transparent; only the pill paints pixels. */
