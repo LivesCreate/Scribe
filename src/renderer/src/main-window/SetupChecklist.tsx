@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { SystemStatusInfo } from '@shared/types'
 
 /**
@@ -10,22 +10,43 @@ export function SetupChecklist(): React.JSX.Element | null {
   const [mic, setMic] = useState<'unknown' | 'granted' | 'denied'>('unknown')
   const [downloadPct, setDownloadPct] = useState<number | null>(null)
 
-  const refresh = (): void => {
+  const refresh = useCallback((): void => {
     void window.scribe.getSystemStatus().then(setStatus)
-  }
-
-  useEffect(() => {
-    refresh()
     void navigator.permissions
       .query({ name: 'microphone' as PermissionName })
       .then((p) => setMic(p.state === 'granted' ? 'granted' : p.state === 'denied' ? 'denied' : 'unknown'))
-      .catch(() => setMic('unknown'))
-    return window.scribe.onModelDownloadProgress(({ pct }) => setDownloadPct(pct))
+      .catch(() => undefined)
   }, [])
 
-  if (!status) return null
   const allGood =
-    status.whisperEngine && status.sttModel && status.ollamaRunning && status.cleanupModelReady && mic === 'granted'
+    status !== null &&
+    status.whisperEngine &&
+    status.sttModel &&
+    status.ollamaRunning &&
+    status.cleanupModelReady &&
+    mic === 'granted'
+
+  useEffect(() => {
+    refresh()
+    const offProgress = window.scribe.onModelDownloadProgress(({ pct }) => setDownloadPct(pct))
+    const onFocus = (): void => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      offProgress()
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [refresh])
+
+  // Auto re-check every few seconds until everything is ready, then stop. This
+  // is why the checklist clears itself after an update once Ollama finishes
+  // starting — no manual "Re-check" needed.
+  useEffect(() => {
+    if (allGood) return
+    const id = setInterval(refresh, 4000)
+    return () => clearInterval(id)
+  }, [allGood, refresh])
+
+  if (status === null) return null
   if (allGood) return null
 
   const requestMic = async (): Promise<void> => {
@@ -40,17 +61,17 @@ export function SetupChecklist(): React.JSX.Element | null {
 
   return (
     <section
-      className="mt-8 rounded-xl border border-amber-300 bg-amber-50 p-6 dark:border-amber-700/50 dark:bg-amber-950/40"
+      className="rounded-2xl border border-line bg-surface p-6"
       aria-label="Setup checklist"
     >
-      <h2 className="text-lg font-medium">Finish setting up</h2>
+      <h2 className="font-serif text-lg text-ink">Finish setting up</h2>
       <ul className="mt-3 space-y-2 text-sm">
         <CheckItem
           ok={mic === 'granted'}
           label="Microphone access"
           action={
             mic !== 'granted' ? (
-              <button onClick={() => void requestMic()} className="font-medium text-sky-600 hover:underline">
+              <button onClick={() => void requestMic()} className="font-medium text-ink hover:underline">
                 {mic === 'denied' ? 'Enable in Windows Settings, then retry' : 'Allow microphone'}
               </button>
             ) : null
@@ -61,7 +82,7 @@ export function SetupChecklist(): React.JSX.Element | null {
           label={`Speech engine${status.whisperVariant !== null ? ` (${status.whisperVariant.toUpperCase()})` : ''}`}
           action={
             !status.whisperEngine ? (
-              <span className="text-zinc-500">Reinstall the app — the engine ships with it.</span>
+              <span className="text-ink-faint">Reinstall the app — the engine ships with it.</span>
             ) : null
           }
         />
@@ -84,7 +105,7 @@ export function SetupChecklist(): React.JSX.Element | null {
                         refresh()
                       })
                   }}
-                  className="font-medium text-sky-600 hover:underline"
+                  className="font-medium text-ink hover:underline"
                 >
                   Download now
                 </button>
@@ -97,7 +118,7 @@ export function SetupChecklist(): React.JSX.Element | null {
           label="Cleanup engine (Ollama)"
           action={
             !status.ollamaRunning ? (
-              <span className="text-zinc-500">
+              <span className="text-ink-faint">
                 Install from ollama.com, or turn off &quot;Clean up my speech&quot; in Settings.
               </span>
             ) : null
@@ -108,16 +129,16 @@ export function SetupChecklist(): React.JSX.Element | null {
           label="Cleanup model"
           action={
             status.ollamaRunning && !status.cleanupModelReady ? (
-              <span className="text-zinc-500">
+              <span className="text-ink-faint">
                 Run{' '}
-                <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-800">ollama pull qwen3:4b-instruct</code>{' '}
+                <code className="rounded bg-surface-2 px-1">ollama pull qwen3:4b-instruct</code>{' '}
                 in a terminal.
               </span>
             ) : null
           }
         />
       </ul>
-      <button onClick={refresh} className="mt-4 text-sm font-medium text-sky-600 hover:underline">
+      <button onClick={refresh} className="mt-4 text-sm font-medium text-ink-muted hover:text-ink">
         Re-check
       </button>
     </section>
@@ -135,10 +156,10 @@ function CheckItem({
 }): React.JSX.Element {
   return (
     <li className="flex items-center gap-2">
-      <span aria-hidden="true" className={ok ? 'text-emerald-500' : 'text-zinc-400'}>
+      <span aria-hidden="true" className={ok ? 'text-emerald-400' : 'text-ink-faint'}>
         {ok ? '✓' : '○'}
       </span>
-      <span className={ok ? 'text-zinc-500 line-through decoration-zinc-300' : 'font-medium'}>{label}</span>
+      <span className={ok ? 'text-ink-faint line-through decoration-line' : 'font-medium text-ink'}>{label}</span>
       <span className="ml-auto">{action}</span>
     </li>
   )

@@ -1,18 +1,19 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, session, Tray } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import type { Settings } from '@shared/types'
+import type { DebugInfo, DisplayInfo, Settings } from '@shared/types'
 import { IPC } from '@shared/types'
 import { ScribeStateMachine } from '@shared/stateMachine'
-import { createStore } from './db'
+import { createStore, type ScribeStore } from './db'
 import { extractCorrections } from './corrections'
 import { downloadSttModel, getSystemStatus } from './status'
+import { checkForUpdates, getUpdateStatus, guardAgainstDowngrade } from './updates'
 import { runFirstRunBenchmark } from './benchmark'
 import { bridgeUrl, startBridge, stopBridge } from './bridge'
 import { firewallBlocked, fixFirewall } from './firewall'
 import { listOllamaModels, warmUpCleanupModel } from './cleanup'
 import { buildDataSnapshot, organizeSnapshot } from './dataView'
-import { createMainWindow, createOverlayWindow } from './windows'
+import { createDebugWindow, createMainWindow, createOverlayWindow, positionOverlay } from './windows'
 import { HotkeyManager } from './hotkey'
 import { runPipeline } from './pipeline'
 
@@ -31,14 +32,24 @@ app.on('second-instance', () => {
 const machine = new ScribeStateMachine()
 let overlay: BrowserWindow | null = null
 let mainWin: BrowserWindow | null = null
+let debugWin: BrowserWindow | null = null
 let hotkeys: HotkeyManager | null = null
 let tray: Tray | null = null
+let currentStore: ScribeStore | null = null
 let quitting = false
 let recordingStartedAt = 0
 let lastHotkeyEvent: { type: 'start' | 'end' | 'toggle'; at: number } | null = null
 
+/** Recent events for the debug console — capped, in-memory, never persisted. */
+const debugLog: { at: number; line: string }[] = []
+function logDebug(line: string): void {
+  debugLog.push({ at: Date.now(), line })
+  if (debugLog.length > 200) debugLog.shift()
+}
+
 function noteHotkeyEvent(type: 'start' | 'end' | 'toggle'): void {
   lastHotkeyEvent = { type, at: Date.now() }
+  logDebug(`hotkey ${type}`)
   broadcast(IPC.hotkeyEvent, lastHotkeyEvent)
 }
 
@@ -67,7 +78,10 @@ function startListening(): void {
   if (machine.state !== 'idle') machine.reset()
   recordingStartedAt = Date.now()
   machine.transition('listening')
-  overlay?.showInactive()
+  if (overlay !== null && !overlay.isDestroyed()) {
+    positionOverlay(overlay, currentStore?.getSettings().overlayDisplayId ?? null)
+    overlay.showInactive()
+  }
   // Capture runs in the MAIN window: the frameless, non-focusable, transparent
   // overlay cannot start an audio source (Chromium AbortError). The main
   // window is a normal renderer and captures reliably, even when hidden.
@@ -93,7 +107,13 @@ function toggleListening(): void {
 
 app.whenReady().then(() => {
   const store = createStore()
+  currentStore = store
   console.log(`[scribe] store backend: ${store.backend}`)
+
+  // Update hygiene: warn if an older installer overwrote a newer app, then
+  // quietly ask GitHub for the newest release (result surfaces in Settings).
+  guardAgainstDowngrade(store)
+  void checkForUpdates().then((u) => logDebug(`update check: ${u.state}${u.latestVersion ? ` (latest ${u.latestVersion})` : ''}`))
 
   // Grant microphone to our own renderers. Everything is local and offline;
   // without this, getUserMedia in the frameless overlay can be denied.
@@ -137,6 +157,10 @@ app.whenReady().then(() => {
 
   machine.onChange((state, detail) => {
     broadcast(IPC.stateChanged, { state, detail })
+    logDebug(`state: ${state}${detail !== undefined ? ` — ${detail}` : ''}`)
+    // Let doubletap mode know a dictation is live: start needs a double-tap,
+    // but stopping takes just one tap while listening.
+    hotkeys?.setListening(state === 'listening')
     if (state === 'idle') overlay?.hide()
     if (state === 'done') {
       setTimeout(() => {
@@ -188,11 +212,66 @@ app.whenReady().then(() => {
     if ('launchAtLogin' in patch) {
       app.setLoginItemSettings({ openAtLogin: next.launchAtLogin, path: process.execPath })
     }
+    if ('overlayDisplayId' in patch && overlay !== null && !overlay.isDestroyed()) {
+      // Reposition immediately, and briefly preview the overlay so the user sees
+      // where it will now appear.
+      positionOverlay(overlay, next.overlayDisplayId)
+      if (machine.state === 'idle') {
+        overlay.showInactive()
+        overlay.webContents.send(IPC.overlayPreview)
+        setTimeout(() => {
+          if (machine.state === 'idle') overlay?.hide()
+        }, 1400)
+      }
+    }
     return next
+  })
+  ipcMain.handle(IPC.getDisplays, (): DisplayInfo[] => {
+    const primaryId = screen.getPrimaryDisplay().id
+    return screen.getAllDisplays().map((d, i) => ({
+      id: d.id,
+      primary: d.id === primaryId,
+      label: `Monitor ${i + 1} — ${d.size.width}×${d.size.height}`
+    }))
+  })
+  ipcMain.handle(IPC.getDebugInfo, async (): Promise<DebugInfo> => {
+    const s = store.getSettings()
+    const primaryId = screen.getPrimaryDisplay().id
+    return {
+      version: app.getVersion(),
+      platform: `${process.platform} · Electron ${process.versions.electron} · Node ${process.versions.node}`,
+      system: await getSystemStatus(s.sttModel, s.cleanupModel),
+      hotkey: {
+        ...(hotkeys?.getStatus() ?? { mode: 'hold' as const, active: false, detail: 'Hotkeys not initialized.' }),
+        lastEventType: lastHotkeyEvent?.type ?? null,
+        lastEventAt: lastHotkeyEvent?.at ?? null
+      },
+      settings: { ...s, cloudApiKey: s.cloudApiKey ? '(set)' : '(none)', bridgeToken: s.bridgeToken ? '(set)' : '(none)' },
+      storageBackend: store.backend,
+      displays: screen.getAllDisplays().map((d, i) => ({
+        id: d.id,
+        primary: d.id === primaryId,
+        label: `Monitor ${i + 1} — ${d.size.width}×${d.size.height}`
+      })),
+      log: [...debugLog].reverse()
+    }
+  })
+  ipcMain.handle(IPC.getUpdateStatus, () => getUpdateStatus())
+  ipcMain.handle(IPC.checkForUpdates, () => checkForUpdates())
+  ipcMain.handle(IPC.openDebugWindow, () => {
+    if (debugWin !== null && !debugWin.isDestroyed()) {
+      debugWin.show()
+      debugWin.focus()
+      return
+    }
+    debugWin = createDebugWindow()
+    debugWin.on('closed', () => {
+      debugWin = null
+    })
   })
   ipcMain.handle(IPC.captureHoldKeys, () => hotkeys?.captureCombo() ?? null)
   ipcMain.handle(IPC.getHotkeyStatus, () => ({
-    ...(hotkeys?.getStatus() ?? { mode: 'toggle' as const, active: false, detail: 'Hotkeys not initialized.' }),
+    ...(hotkeys?.getStatus() ?? { mode: 'hold' as const, active: false, detail: 'Hotkeys not initialized.' }),
     lastEventType: lastHotkeyEvent?.type ?? null,
     lastEventAt: lastHotkeyEvent?.at ?? null
   }))
@@ -209,6 +288,9 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.getDictionary, () => store.getDictionary())
   ipcMain.handle(IPC.addDictionaryTerm, (_e, term: string, hint: string | null) =>
     store.addDictionaryTerm(term, hint, 'manual')
+  )
+  ipcMain.handle(IPC.updateDictionaryTerm, (_e, id: number, term: string, hint: string | null) =>
+    store.updateDictionaryTerm(id, term, hint)
   )
   ipcMain.handle(IPC.removeDictionaryTerm, (_e, id: number) => store.removeDictionaryTerm(id))
   ipcMain.handle(IPC.deleteAllData, () => store.deleteAllData())
@@ -239,6 +321,7 @@ app.whenReady().then(() => {
   // The overlay could not open the microphone: tell the user instead of
   // sitting silently in the listening state.
   ipcMain.on(IPC.micError, (_e, message: string) => {
+    logDebug(`mic error: ${message}`)
     try {
       require('node:fs').appendFileSync(
         join(app.getPath('userData'), 'mic-error.log'),

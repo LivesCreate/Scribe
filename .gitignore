@@ -9,6 +9,19 @@ models/
 *.local
 temp/
 
+# never publish — local personal data / absolute paths
 docs/reference-screenshots/
 graphify-out/
 *.tsbuildinfo
+
+# mobile (Expo) build + tooling artifacts
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/dist-check/
+mobile/web-build/
+mobile/.claude/
+mobile/CLAUDE.md
+mobile/AGENTS.md
+mobile/android/
+mobile/ios/

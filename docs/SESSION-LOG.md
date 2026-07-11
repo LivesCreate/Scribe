@@ -4,7 +4,7 @@ Compact record of the Claude Code session that built Scribe, so any future sessi
 
 ## Arc
 1. User supplied a complete build-spec (`BUILD-SPEC.md`) for a free, private Wispr Flow replacement. Machine scan drove the execution plan (`EXECUTION-PLAN.md`): no Rust/MSVC/Python → Electron + prebuilt binaries; RTX 3060 + 16 GB → mid/high tier local models.
-2. An Ultraplan cloud-refinement handoff was attempted; it required a git repo, which is why the project repo was created and the docs committed before any code.
+2. An Ultraplan cloud-refinement handoff was attempted; it required a git repo, which is why `the project folder` was created and the docs committed before any code.
 3. Built in the spec's gated phases 0–7, committing at every gate. All 8 phases closed in one session.
 
 ## What happened per phase (with the failures that mattered)

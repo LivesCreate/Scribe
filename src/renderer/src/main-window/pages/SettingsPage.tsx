@@ -1,21 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { HotkeyStatus, Settings, WritingStyle } from '@shared/types'
+import type { DisplayInfo, HotkeyStatus, Settings, UpdateStatus, WritingStyle } from '@shared/types'
+import { CHANGELOG, CURRENT_VERSION } from '@shared/changelog'
+import { WarningIcon } from '../Icons'
 import {
-  ChipIcon,
-  CloudIcon,
-  KeyboardIcon,
-  MicIcon,
-  MonitorIcon,
-  PenIcon,
-  PhoneIcon,
-  ShieldIcon,
-  WarningIcon
-} from '../Icons'
+  Button,
+  Card,
+  Kbd,
+  PageTitle,
+  Segmented,
+  SettingGroup,
+  SettingRow,
+  Toggle,
+  applyUiTheme,
+  selectCls,
+  type UiTheme
+} from '../ui'
 
 interface MicOption {
   deviceId: string
   label: string
 }
+
+const STYLES: readonly WritingStyle[] = ['professional', 'casual', 'messaging', 'concise']
+
+const STYLE_HINTS: Record<WritingStyle, string> = {
+  professional: 'Polished, structured, and clean — condenses long rambles and removes swearing.',
+  casual: 'Relaxed and natural, contractions welcome.',
+  messaging: 'Short and chat-like, with no trailing period.',
+  concise: 'Tightens rambling into the fewest words — it actually shortens what you said.'
+}
+
+const THEMES: readonly UiTheme[] = ['black', 'blue', 'white']
+
+const HOTKEY_MODES: readonly Settings['hotkeyMode'][] = ['hold', 'doubletap']
 
 export function SettingsPage(): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -23,11 +40,46 @@ export function SettingsPage(): React.JSX.Element {
   const [bridgeUrl, setBridgeUrl] = useState<string | null>(null)
   const [firewallBlocked, setFirewallBlocked] = useState(false)
   const [fixingFirewall, setFixingFirewall] = useState(false)
-  const [capturing, setCapturing] = useState<'hold' | 'toggle' | null>(null)
+  const [capturing, setCapturing] = useState<'hold' | null>(null)
   const [mics, setMics] = useState<MicOption[]>([])
   const [defaultMicName, setDefaultMicName] = useState<string | null>(null)
   const [ollamaModels, setOllamaModels] = useState<string[] | null>(null)
   const [hotkeyStatus, setHotkeyStatus] = useState<HotkeyStatus | null>(null)
+  const [displays, setDisplays] = useState<DisplayInfo[]>([])
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const [sttModelReady, setSttModelReady] = useState<boolean | null>(null)
+  const [sttDownloadPct, setSttDownloadPct] = useState<number | null>(null)
+  /** Set while asking "download this model, or go back?" after a switch. */
+  const [pendingModel, setPendingModel] = useState<{ name: string; previous: string } | null>(null)
+
+  // A newly selected speech model may not be on disk yet — dictation would
+  // fail until it is. Check whenever the choice changes, and offer the
+  // download right here instead of letting the pipeline error later.
+  const refreshSttModelReady = useCallback((): void => {
+    void window.scribe.getSystemStatus().then((s) => setSttModelReady(s.sttModel))
+  }, [])
+  useEffect(() => {
+    if (settings !== null) refreshSttModelReady()
+  }, [settings?.sttModel, refreshSttModelReady, settings])
+  useEffect(
+    () =>
+      window.scribe.onModelDownloadProgress(({ pct }) => {
+        setSttDownloadPct(pct)
+      }),
+    []
+  )
+
+  const downloadSttModel = (): void => {
+    setSttDownloadPct(0)
+    void window.scribe
+      .getSettings()
+      .then((s) => window.scribe.downloadSttModel(s.sttModel))
+      .then(() => {
+        setSttDownloadPct(null)
+        refreshSttModelReady()
+      })
+  }
 
   const refreshMics = useCallback(async (): Promise<void> => {
     try {
@@ -56,6 +108,8 @@ export function SettingsPage(): React.JSX.Element {
     void window.scribe.getSettings().then(setSettings)
     void window.scribe.getBridgeUrl().then(setBridgeUrl)
     void window.scribe.listOllamaModels().then(setOllamaModels)
+    void window.scribe.getDisplays().then(setDisplays)
+    void window.scribe.getUpdateStatus().then(setUpdateStatus)
     void refreshMics()
     refreshHotkeyStatus()
     const offHotkey = window.scribe.onHotkeyEvent(() => refreshHotkeyStatus())
@@ -79,7 +133,8 @@ export function SettingsPage(): React.JSX.Element {
     const combo = await window.scribe.captureHoldKeys()
     setCapturing(null)
     if (combo !== null && combo.keycodes.length > 0) {
-      update({ holdKeycodes: combo.keycodes, holdKeyLabel: combo.label, hotkeyMode: 'hold' })
+      // Change only the keys — the same combo drives whichever mode is active.
+      update({ holdKeycodes: combo.keycodes, holdKeyLabel: combo.label })
     }
   }
 
@@ -115,23 +170,54 @@ export function SettingsPage(): React.JSX.Element {
     })
   }
 
-  if (!settings) return <div className="text-sm text-zinc-500">Loading…</div>
+  if (!settings) return <div className="text-sm text-ink-faint">Loading…</div>
 
   const currentMicKnown = settings.micDeviceId === null || mics.some((m) => m.deviceId === settings.micDeviceId)
 
   return (
-    <div className="max-w-2xl space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-zinc-400">Everything applies instantly — no save button.</p>
-      </div>
+    <div className="mx-auto max-w-2xl space-y-8">
+      <PageTitle title="Settings" subtitle="Everything applies instantly — no save button." />
 
-      <Section
-        icon={<MicIcon className="h-4.5 w-4.5" />}
-        title="Microphone"
-        description="Which mic Scribe listens to. Plug in a new one and it appears here."
-      >
-        <Row label="Input device" sub={currentMicKnown ? undefined : 'Your saved mic is unplugged — using the system default.'}>
+      <SettingGroup title="Updates" intro="On every launch Scribe compares itself to the newest GitHub release. Downgrades are detected and warned about.">
+        <SettingRow
+          label="Update check"
+          description={
+            updateStatus === null || updateStatus.state === 'checking'
+              ? 'Checking for updates…'
+              : updateStatus.state === 'current'
+                ? `Up to date — v${updateStatus.currentVersion} is the newest release.`
+                : updateStatus.state === 'available'
+                  ? `Update available: v${updateStatus.latestVersion} (you have v${updateStatus.currentVersion}).`
+                  : updateStatus.state === 'no-releases'
+                    ? `v${updateStatus.currentVersion} — no releases published on GitHub yet.`
+                    : `v${updateStatus.currentVersion} — could not reach GitHub (offline?).`
+          }
+        >
+          {updateStatus?.state === 'available' && updateStatus.url !== null && (
+            <Button variant="primary" onClick={() => window.open(updateStatus.url ?? '', '_blank')}>
+              Get update
+            </Button>
+          )}
+          <Button
+            disabled={checkingUpdates}
+            onClick={() => {
+              setCheckingUpdates(true)
+              void window.scribe.checkForUpdates().then((u) => {
+                setUpdateStatus(u)
+                setCheckingUpdates(false)
+              })
+            }}
+          >
+            {checkingUpdates ? 'Checking…' : 'Check now'}
+          </Button>
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="Microphone" intro="Which mic Scribe listens to. Plug in a new one and it appears here.">
+        <SettingRow
+          label="Input device"
+          description={currentMicKnown ? undefined : 'Your saved mic is unplugged — using the system default.'}
+        >
           <select
             value={settings.micDeviceId ?? ''}
             onChange={(e) => {
@@ -150,159 +236,218 @@ export function SettingsPage(): React.JSX.Element {
               </option>
             ))}
           </select>
-        </Row>
+        </SettingRow>
         {mics.length === 0 && (
-          <p className="mt-2 text-xs text-amber-400">
+          <p className="py-3 text-xs text-amber-400/90">
             No microphones found (or mic permission is blocked). Connect one, then reopen this page.
           </p>
         )}
-        <Divider />
-        <Row label="Mic check" sub="Speak normally — the bar should move. The mic opens only while you're testing.">
+        <SettingRow label="Mic check" description="Speak normally — the bar should move. The mic opens only while you're testing.">
           <MicCheck deviceId={settings.micDeviceId} />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingGroup>
 
-      <Section
-        icon={<PenIcon className="h-4.5 w-4.5" />}
-        title="Writing style"
-        description="How Scribe formats what you say."
-      >
-        <div className="flex gap-2" role="radiogroup" aria-label="Writing style">
-          {(['professional', 'casual', 'messaging'] as WritingStyle[]).map((s) => (
-            <button
-              key={s}
-              role="radio"
-              aria-checked={settings.style === s}
-              onClick={() => update({ style: s })}
-              className={`rounded-lg border px-4 py-1.5 text-sm font-medium capitalize transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 ${
-                settings.style === s
-                  ? 'border-sky-500/60 bg-sky-500/15 text-sky-300'
-                  : 'border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </Section>
+      <SettingGroup title="Writing style" intro="How Scribe shapes what you say.">
+        <SettingRow label="Style" description={STYLE_HINTS[settings.style]}>
+          <Segmented options={STYLES} value={settings.style} onChange={(s) => update({ style: s })} ariaLabel="Writing style" />
+        </SettingRow>
+      </SettingGroup>
 
-      <Section
-        icon={<KeyboardIcon className="h-4.5 w-4.5" />}
-        title="Shortcuts"
-        description="How you start a dictation."
-      >
+      <SettingGroup title="Appearance" intro="Pick the color palette for the whole app.">
+        <SettingRow label="Color palette" description="Black is the classic look; Blue tints every surface; White is a clean light mode.">
+          <Segmented
+            options={THEMES}
+            value={settings.uiTheme}
+            onChange={(t) => {
+              applyUiTheme(t)
+              update({ uiTheme: t })
+            }}
+            ariaLabel="Color palette"
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      <section>
+        <h2 className="mb-2 px-1 font-serif text-lg text-ink">Shortcut</h2>
         {hotkeyStatus !== null && (
-          <div
-            className={`mb-4 rounded-lg border p-3 text-sm ${
-              hotkeyStatus.active
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                : 'border-red-500/40 bg-red-500/10 text-red-200'
-            }`}
-          >
-            <p className="flex items-center gap-2 font-medium">
-              <span className={`h-2 w-2 rounded-full ${hotkeyStatus.active ? 'bg-emerald-400' : 'bg-red-400'}`} />
-              {hotkeyStatus.detail}
-            </p>
-            <p className={`mt-1 text-xs ${hotkeyStatus.active ? 'text-emerald-200/70' : 'text-red-200/70'}`}>
-              {hotkeyStatus.lastEventAt !== null
-                ? `Last shortcut press detected: ${new Date(hotkeyStatus.lastEventAt).toLocaleTimeString()} (${hotkeyStatus.lastEventType ?? '?'})`
-                : 'No shortcut press detected yet — press your shortcut right now and this line will update.'}
-            </p>
+          <div className="mb-2.5 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm">
+            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${hotkeyStatus.active ? 'bg-emerald-400' : 'bg-red-400'}`} />
+            <div>
+              <p className="font-medium text-ink">{hotkeyStatus.detail}</p>
+              <p className="mt-0.5 text-xs text-ink-faint">
+                {hotkeyStatus.lastEventAt !== null
+                  ? `Last shortcut press detected: ${new Date(hotkeyStatus.lastEventAt).toLocaleTimeString()} (${hotkeyStatus.lastEventType ?? '?'})`
+                  : 'No press detected yet — press your shortcut now and this line will update.'}
+              </p>
+            </div>
           </div>
         )}
-        <Row
-          label="Push to talk"
-          sub={
-            capturing === 'hold' ? (
-              <span className="text-sky-400">Press your key or combo now…</span>
-            ) : (
-              <>
-                Hold <Kbd>{settings.holdKeyLabel}</Kbd> and speak
-              </>
-            )
-          }
-          active={settings.hotkeyMode === 'hold'}
-        >
-          {settings.hotkeyMode !== 'hold' && (
-            <GhostButton onClick={() => update({ hotkeyMode: 'hold' })}>Use this</GhostButton>
-          )}
-          <GhostButton onClick={() => void captureHold()} disabled={capturing !== null}>
-            {capturing === 'hold' ? 'Listening…' : 'Change'}
-          </GhostButton>
-        </Row>
-        <Divider />
-        <Row
-          label="Toggle on/off"
-          sub={
-            capturing === 'toggle' ? (
-              <span className="text-sky-400">Press a key combination…</span>
-            ) : (
-              <>
-                Press <Kbd>{settings.toggleAccelerator}</Kbd> to start and stop
-              </>
-            )
-          }
-          active={settings.hotkeyMode === 'toggle'}
-        >
-          {settings.hotkeyMode !== 'toggle' && (
-            <GhostButton onClick={() => update({ hotkeyMode: 'toggle' })}>Use this</GhostButton>
-          )}
-          <GhostButton
-            onClick={() => setCapturing(capturing === 'toggle' ? null : 'toggle')}
-            onKeyDown={(e) => {
-              if (capturing !== 'toggle') return
-              e.preventDefault()
-              const accel = toAccelerator(e)
-              if (accel !== null) {
-                update({ toggleAccelerator: accel, hotkeyMode: 'toggle' })
-                setCapturing(null)
-              }
-            }}
+        <Card className="divide-y divide-line px-5">
+          <SettingRow
+            label="Your shortcut"
+            description={
+              capturing === 'hold' ? (
+                <span className="text-ink">Press your key or combo now…</span>
+              ) : (
+                <>
+                  Currently <Kbd>{settings.holdKeyLabel}</Kbd> — used by both modes
+                </>
+              )
+            }
           >
-            {capturing === 'toggle' ? 'Listening…' : 'Change'}
-          </GhostButton>
-        </Row>
-      </Section>
+            <Button onClick={() => void captureHold()} disabled={capturing !== null}>
+              {capturing === 'hold' ? 'Listening…' : 'Change'}
+            </Button>
+          </SettingRow>
+          <SettingRow
+            label="How it triggers"
+            description={
+              settings.hotkeyMode === 'hold' ? (
+                <>
+                  Hold <Kbd>{settings.holdKeyLabel}</Kbd>, speak, release. Heads up: holding Ctrl/Win
+                  also changes how scrolling and clicking behave while you dictate — Double-tap is
+                  hands-free.
+                </>
+              ) : (
+                <>
+                  Double-tap <Kbd>{settings.holdKeyLabel}</Kbd> to start, speak hands-free, then tap
+                  once to stop.
+                </>
+              )
+            }
+          >
+            <Segmented
+              options={HOTKEY_MODES}
+              value={settings.hotkeyMode}
+              onChange={(m) => update({ hotkeyMode: m })}
+              ariaLabel="Shortcut trigger mode"
+              labels={{ hold: 'Hold', doubletap: 'Double-tap' }}
+            />
+          </SettingRow>
+        </Card>
+      </section>
 
-      <Section
-        icon={<MonitorIcon className="h-4.5 w-4.5" />}
-        title="System"
-        description="How Scribe behaves on this PC."
-      >
-        <Toggle
-          label="Launch at login"
-          description="Start Scribe automatically so the hotkey is always ready."
-          checked={settings.launchAtLogin}
-          onChange={(v) => update({ launchAtLogin: v })}
-        />
-      </Section>
-
-      <Section
-        icon={<ChipIcon className="h-4.5 w-4.5" />}
-        title="Models"
-        description="Bigger models are more accurate but slower."
-      >
-        <Row label="Speech recognition">
-          <select value={settings.sttModel} onChange={(e) => update({ sttModel: e.target.value })} className={selectCls}>
-            <option value="base.en">base.en — fast</option>
-            <option value="small.en">small.en — more accurate</option>
+      <SettingGroup title="Dictation overlay" intro="The little pill that shows a live indicator while you speak.">
+        <SettingRow
+          label="Show on monitor"
+          description={
+            displays.length > 1
+              ? 'Changing this flashes the overlay on the chosen screen so you can see where it lands.'
+              : 'Pick which screen the listening pill appears on.'
+          }
+        >
+          <select
+            value={settings.overlayDisplayId ?? ''}
+            onChange={(e) => update({ overlayDisplayId: e.target.value === '' ? null : Number(e.target.value) })}
+            className={selectCls}
+          >
+            {/* The default option IS the primary display — never list it twice. */}
+            <option value="">Primary monitor</option>
+            {displays
+              .filter((d) => !d.primary)
+              .map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
           </select>
-        </Row>
-        <Divider />
-        <Row
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="System" intro="How Scribe behaves on this PC.">
+        <SettingRow label="Launch at login" description="Start Scribe automatically so the hotkey is always ready.">
+          <Toggle label="Launch at login" checked={settings.launchAtLogin} onChange={(v) => update({ launchAtLogin: v })} />
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup title="Models" intro="Bigger models are more accurate but slower.">
+        <SettingRow
+          label="Speech recognition"
+          description={
+            pendingModel !== null ? (
+              <span className="text-ink">
+                <b>{pendingModel.name}</b> isn&apos;t on this PC yet. Download it now, or go back to{' '}
+                <b>{pendingModel.previous}</b>?
+              </span>
+            ) : sttModelReady === false ? (
+              <span className="text-amber-400">
+                This model is not downloaded yet — dictation will fail until you download it.
+              </span>
+            ) : settings.sttModel === 'distil-large-v3' ? (
+              'Distil-Whisper: near large-v3 accuracy at a fraction of the compute. English only.'
+            ) : settings.sttModel === 'large-v3-turbo' ? (
+              'Multilingual — auto-detects and transcribes 99+ languages.'
+            ) : (
+              'Turns your voice into raw text.'
+            )
+          }
+        >
+          {pendingModel !== null ? (
+            <>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setPendingModel(null)
+                  downloadSttModel()
+                }}
+              >
+                Download
+              </Button>
+              <Button
+                onClick={() => {
+                  const prev = pendingModel.previous
+                  setPendingModel(null)
+                  update({ sttModel: prev })
+                }}
+              >
+                Go back
+              </Button>
+            </>
+          ) : (
+            sttModelReady === false &&
+            (sttDownloadPct !== null && sttDownloadPct < 100 ? (
+              <span className="text-sm text-ink-muted" aria-live="polite">
+                Downloading… {sttDownloadPct}%
+              </span>
+            ) : (
+              <Button variant="primary" onClick={downloadSttModel}>
+                Download
+              </Button>
+            ))
+          )}
+          <select
+            value={pendingModel?.name ?? settings.sttModel}
+            onChange={(e) => {
+              const next = e.target.value
+              const prev = pendingModel?.previous ?? settings.sttModel
+              setPendingModel(null)
+              void window.scribe.setSettings({ sttModel: next }).then((s) => {
+                setSettings(s)
+                void window.scribe.getSystemStatus().then((status) => {
+                  setSttModelReady(status.sttModel)
+                  // Not on disk: ask before committing — "no" reverts to prev.
+                  if (!status.sttModel && next !== prev) setPendingModel({ name: next, previous: prev })
+                })
+              })
+            }}
+            className={selectCls}
+          >
+            <option value="base.en">base.en — fastest, light</option>
+            <option value="small.en">small.en — balanced</option>
+            <option value="distil-large-v3">distil-large-v3 — best English (fast, ~1.5 GB)</option>
+            <option value="large-v3-turbo">large-v3-turbo — multilingual (~1.6 GB)</option>
+          </select>
+        </SettingRow>
+        <SettingRow
           label="Cleanup model"
-          sub={
+          description={
             ollamaModels !== null && ollamaModels.length === 0
               ? 'Ollama is not running — showing the saved name.'
               : 'Models installed in Ollama on this PC.'
           }
         >
           {ollamaModels !== null && ollamaModels.length > 0 ? (
-            <select
-              value={settings.cleanupModel}
-              onChange={(e) => update({ cleanupModel: e.target.value })}
-              className={selectCls}
-            >
+            <select value={settings.cleanupModel} onChange={(e) => update({ cleanupModel: e.target.value })} className={selectCls}>
               {!ollamaModels.includes(settings.cleanupModel) && (
                 <option value={settings.cleanupModel}>{settings.cleanupModel} (not installed)</option>
               )}
@@ -313,39 +458,32 @@ export function SettingsPage(): React.JSX.Element {
               ))}
             </select>
           ) : (
-            <span className="rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-sm text-zinc-300">
-              {settings.cleanupModel}
-            </span>
+            <span className="rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-sm text-ink">{settings.cleanupModel}</span>
           )}
-        </Row>
-        <Divider />
-        <Toggle
-          label="Clean up my speech"
-          description="Off = raw transcription only."
-          checked={settings.cleanupEnabled}
-          onChange={(v) => update({ cleanupEnabled: v })}
-        />
-      </Section>
+        </SettingRow>
+        <SettingRow label="Clean up my speech" description="Off = raw transcription only.">
+          <Toggle label="Clean up my speech" checked={settings.cleanupEnabled} onChange={(v) => update({ cleanupEnabled: v })} />
+        </SettingRow>
+      </SettingGroup>
 
-      <Section
-        icon={<PhoneIcon className="h-4.5 w-4.5" />}
+      <SettingGroup
         title="Phone access"
-        description="Dictate from your phone using this PC's models — over your own Wi-Fi only, nothing touches the internet."
+        intro="Dictate from your phone using this PC's models — over your own Wi-Fi only, nothing touches the internet."
       >
-        <Toggle
+        <SettingRow
           label="Enable phone dictation"
-          description={settings.bridgeEnabled ? 'On — open the link below in your phone browser.' : 'Off.'}
-          checked={settings.bridgeEnabled}
-          onChange={setBridge}
-        />
+          description={settings.bridgeEnabled ? 'On — open the link below in your phone browser or the Scribe app.' : 'Off.'}
+        >
+          <Toggle label="Enable phone dictation" checked={settings.bridgeEnabled} onChange={setBridge} />
+        </SettingRow>
         {firewallBlocked && (
-          <div className="mt-3 flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
-            <WarningIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="flex items-start gap-3 py-4 text-sm text-amber-200">
+            <WarningIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
             <div>
               <p className="font-medium">Windows Firewall is blocking Scribe.</p>
-              <p className="mt-1 text-amber-200/80">
-                The firewall prompt was cancelled earlier, so your phone can never reach this PC. Scribe turned the
-                setting back off to match reality.
+              <p className="mt-1 text-amber-200/70">
+                The firewall prompt was cancelled earlier, so your phone can never reach this PC. Scribe turned the setting
+                back off to match reality.
               </p>
               <button
                 onClick={fixFirewall}
@@ -354,39 +492,37 @@ export function SettingsPage(): React.JSX.Element {
               >
                 {fixingFirewall ? 'Waiting for Windows…' : 'Allow in Firewall…'}
               </button>
-              <p className="mt-1.5 text-xs text-amber-200/60">Windows will ask for permission once (UAC).</p>
+              <p className="mt-1.5 text-xs text-amber-200/50">Windows will ask for permission once (UAC).</p>
             </div>
           </div>
         )}
         {settings.bridgeEnabled && bridgeUrl !== null && (
-          <div className="mt-3 flex items-center gap-2 text-sm">
-            <code className="rounded bg-zinc-800 px-2 py-1 text-zinc-200">{bridgeUrl}</code>
-            <button onClick={() => void navigator.clipboard.writeText(bridgeUrl)} className="font-medium text-sky-400 hover:underline">
+          <div className="flex items-center gap-2 py-4 text-sm">
+            <code className="rounded bg-surface-2 px-2 py-1 text-ink">{bridgeUrl}</code>
+            <button onClick={() => void navigator.clipboard.writeText(bridgeUrl)} className="font-medium text-ink-muted hover:text-ink">
               Copy
             </button>
           </div>
         )}
-      </Section>
+      </SettingGroup>
 
-      <Section
-        icon={<CloudIcon className="h-4.5 w-4.5" />}
+      <SettingGroup
         title="Cloud double-check"
-        description="Off by default and never required. When on, Scribe still cleans your speech locally first, then a stronger cloud model proofreads that result and fixes anything it missed. Only the TEXT (never audio) is sent, using your own free API key, and the check is capped at 8 seconds. The overlay shows a notice every time."
+        intro="Off by default and never required. When on, Scribe still cleans your speech locally first, then a stronger cloud model proofreads that result and fixes anything it missed. Only the TEXT (never audio) is sent, using your own free API key, capped at 8 seconds. The overlay shows a notice every time."
       >
-        <Toggle
+        <SettingRow
           label="Double-check with the cloud"
           description={
             settings.cloudEnabled
               ? `Active — the local result is proofread by ${settings.cloudProvider ?? 'no provider selected'}.`
               : 'Inactive — everything stays on this device.'
           }
-          checked={settings.cloudEnabled}
-          onChange={(v) => update({ cloudEnabled: v })}
-        />
+        >
+          <Toggle label="Double-check with the cloud" checked={settings.cloudEnabled} onChange={(v) => update({ cloudEnabled: v })} />
+        </SettingRow>
         {settings.cloudEnabled && (
           <>
-            <Divider />
-            <Row label="Provider">
+            <SettingRow label="Provider">
               <select
                 value={settings.cloudProvider ?? ''}
                 onChange={(e) => update({ cloudProvider: e.target.value === '' ? null : (e.target.value as 'groq' | 'gemini') })}
@@ -396,63 +532,120 @@ export function SettingsPage(): React.JSX.Element {
                 <option value="groq">Groq (free tier)</option>
                 <option value="gemini">Google Gemini (free tier)</option>
               </select>
-            </Row>
-            <Divider />
-            <Row label="Your API key" sub="Saved when you click away from the box.">
+            </SettingRow>
+            <SettingRow label="Your API key" description="Saved when you click away from the box.">
               <ApiKeyInput value={settings.cloudApiKey} onCommit={(v) => update({ cloudApiKey: v })} />
-            </Row>
+            </SettingRow>
           </>
         )}
-      </Section>
+      </SettingGroup>
 
-      <Section
-        icon={<ShieldIcon className="h-4.5 w-4.5" />}
-        title="Privacy"
-        description="Everything runs on this device. Nothing is uploaded, ever."
-      >
-        <Toggle
-          label="Save history"
-          description="Keep past dictations on this device so you can re-copy and fix words."
-          checked={settings.saveHistory}
-          onChange={(v) => update({ saveHistory: v })}
-        />
-        <Divider />
-        {!confirmDelete ? (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="rounded-lg border border-red-500/40 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-500/10"
-          >
-            Delete all data…
-          </button>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-red-400">Delete history, dictionary, and settings?</span>
+      <SettingGroup title="Privacy" intro="Everything runs on this device. Nothing is uploaded, ever.">
+        <SettingRow label="Save history" description="Keep past dictations on this device so you can re-copy and fix words.">
+          <Toggle label="Save history" checked={settings.saveHistory} onChange={(v) => update({ saveHistory: v })} />
+        </SettingRow>
+        <div className="py-4">
+          {!confirmDelete ? (
             <button
-              onClick={() => {
-                void window.scribe.deleteAllData().then(() => {
-                  setConfirmDelete(false)
-                  void window.scribe.getSettings().then(setSettings)
-                })
-              }}
-              className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500"
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-lg border border-red-500/40 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-500/10"
             >
-              Yes, delete everything
+              Delete all data…
             </button>
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-400 hover:bg-zinc-800"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-      </Section>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-red-400">Delete history, dictionary, and settings?</span>
+              <button
+                onClick={() => {
+                  void window.scribe.deleteAllData().then(() => {
+                    setConfirmDelete(false)
+                    void window.scribe.getSettings().then(setSettings)
+                  })
+                }}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500"
+              >
+                Yes, delete everything
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-surface-2">
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      </SettingGroup>
+
+      <SettingGroup title="Advanced" intro="A companion window with live diagnostics — in plain words or raw JSON.">
+        <SettingRow label="Debug console" description="See what Scribe is doing under the hood.">
+          <Button onClick={() => void window.scribe.openDebugWindow()}>Open</Button>
+        </SettingRow>
+      </SettingGroup>
+
+      <WhatsNew />
     </div>
   )
 }
 
-const selectCls =
-  'max-w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-sky-500 focus:outline-none'
+/** MAJOR (x.0.0) → Major; MINOR (x.y.0) → Feature; anything else → Small fix. */
+function updateScale(version: string): 'major' | 'feature' | 'small' {
+  const [, minor, patch] = version.split('.').map((n) => parseInt(n, 10) || 0)
+  if ((patch ?? 0) > 0) return 'small'
+  if ((minor ?? 0) > 0) return 'feature'
+  return 'major'
+}
+
+const SCALE_LABELS: Record<'major' | 'feature' | 'small', string> = {
+  major: 'Major updates',
+  feature: 'Smaller updates',
+  small: 'Smallest updates & fixes'
+}
+
+/**
+ * Version history, tucked at the bottom of Settings and collapsed by default.
+ * Entries are cataloged by scale — Major, then smaller feature updates, then
+ * the smallest fixes — each with its release date. Driven by the shared
+ * CHANGELOG.
+ */
+function WhatsNew(): React.JSX.Element {
+  const groups = (['major', 'feature', 'small'] as const)
+    .map((scale) => ({ scale, entries: CHANGELOG.filter((e) => updateScale(e.version) === scale) }))
+    .filter((g) => g.entries.length > 0)
+  return (
+    <details className="group rounded-2xl border border-line bg-surface">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3.5 text-sm text-ink-muted hover:text-ink">
+        <span className="font-medium">What&apos;s new</span>
+        <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted">v{CURRENT_VERSION}</span>
+        <span className="flex-1" />
+        <span className="text-xs text-ink-faint transition-transform group-open:rotate-90">›</span>
+      </summary>
+      <div className="max-h-96 overflow-y-auto border-t border-line px-5 py-4">
+        {groups.map((g) => (
+          <div key={g.scale} className="mb-5 last:mb-0">
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+              {SCALE_LABELS[g.scale]}
+            </h3>
+            <ol className="space-y-5">
+              {g.entries.map((entry) => (
+                <li key={entry.version}>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-sm font-semibold text-ink">v{entry.version}</span>
+                    <span className="text-sm text-ink-muted">— {entry.title}</span>
+                    <span className="flex-1" />
+                    <span className="shrink-0 text-[11px] text-ink-faint">Released {entry.date}</span>
+                  </div>
+                  <ul className="mt-1.5 list-disc space-y-1 pl-5 text-xs leading-relaxed text-ink-muted marker:text-ink-faint">
+                    {entry.changes.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
 
 /** Local-draft key field: committing on every keystroke dropped characters (IPC round-trip). */
 function ApiKeyInput({ value, onCommit }: { value: string | null; onCommit: (v: string | null) => void }): React.JSX.Element {
@@ -465,7 +658,7 @@ function ApiKeyInput({ value, onCommit }: { value: string | null; onCommit: (v: 
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => onCommit(draft === '' ? null : draft)}
       placeholder="stored only on this device"
-      className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-sky-500 focus:outline-none"
+      className="w-60 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-sm text-ink focus:border-zinc-500 focus:outline-none"
     />
   )
 }
@@ -479,19 +672,12 @@ function MicCheck({ deviceId }: { deviceId: string | null }): React.JSX.Element 
     return () => clearTimeout(t)
   }, [testing])
   if (!testing) {
-    return (
-      <button
-        onClick={() => setTesting(true)}
-        className="rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:border-zinc-500"
-      >
-        Test mic
-      </button>
-    )
+    return <Button onClick={() => setTesting(true)}>Test mic</Button>
   }
   return (
     <div className="flex items-center gap-2">
       <MicMeter deviceId={deviceId} />
-      <button onClick={() => setTesting(false)} className="text-xs font-medium text-zinc-400 hover:text-zinc-200">
+      <button onClick={() => setTesting(false)} className="text-xs font-medium text-ink-muted hover:text-ink">
         Stop
       </button>
     </div>
@@ -550,139 +736,11 @@ function MicMeter({ deviceId }: { deviceId: string | null }): React.JSX.Element 
     return <span className="max-w-56 text-xs text-red-400">Can&apos;t open this mic: {error}</span>
   }
   return (
-    <div className="h-2.5 w-48 overflow-hidden rounded-full bg-zinc-800" role="meter" aria-label="Microphone level" aria-valuenow={Math.round(level * 100)}>
+    <div className="h-2.5 w-48 overflow-hidden rounded-full bg-surface-2" role="meter" aria-label="Microphone level" aria-valuenow={Math.round(level * 100)}>
       <div
-        className={`h-full rounded-full transition-[width] duration-75 ${level > 0.03 ? 'bg-emerald-400' : 'bg-zinc-600'}`}
+        className={`h-full rounded-full transition-[width] duration-75 ${level > 0.03 ? 'bg-accent' : 'bg-line'}`}
         style={{ width: `${Math.max(3, level * 100)}%` }}
       />
     </div>
-  )
-}
-
-function Section({
-  icon,
-  title,
-  description,
-  children
-}: {
-  icon: React.ReactNode
-  title: string
-  description: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-5">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800 text-zinc-300">{icon}</span>
-        <div>
-          <h2 className="text-base font-medium leading-tight">{title}</h2>
-        </div>
-      </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-400">{description}</p>
-      <div className="mt-4">{children}</div>
-    </section>
-  )
-}
-
-function Row({
-  label,
-  sub,
-  active,
-  children
-}: {
-  label: string
-  sub?: React.ReactNode
-  active?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-4 text-sm">
-      <span className="min-w-0">
-        <span className="flex items-center gap-2 font-medium">
-          {label}
-          {active === true && (
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
-              in use
-            </span>
-          )}
-        </span>
-        {sub !== undefined && <span className="mt-0.5 block text-xs text-zinc-400">{sub}</span>}
-      </span>
-      <div className="flex shrink-0 items-center gap-2">{children}</div>
-    </div>
-  )
-}
-
-function Divider(): React.JSX.Element {
-  return <div className="my-3 h-px bg-zinc-800" />
-}
-
-function GhostButton(props: React.ButtonHTMLAttributes<HTMLButtonElement>): React.JSX.Element {
-  const { className: _ignored, ...rest } = props
-  return (
-    <button
-      {...rest}
-      className="rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-700/60 disabled:opacity-50"
-    />
-  )
-}
-
-function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <kbd className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-xs text-zinc-200">
-      {children}
-    </kbd>
-  )
-}
-
-/** Builds an Electron accelerator from a keydown event; null for bare modifiers. */
-function toAccelerator(e: React.KeyboardEvent): string | null {
-  const key = e.key
-  if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) return null
-  const parts: string[] = []
-  if (e.ctrlKey) parts.push('Control')
-  if (e.altKey) parts.push('Alt')
-  if (e.shiftKey) parts.push('Shift')
-  if (e.metaKey) parts.push('Super')
-  if (parts.length === 0) return null // require at least one modifier for a global shortcut
-  const named: Record<string, string> = { ' ': 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right' }
-  parts.push(named[key] ?? (key.length === 1 ? key.toUpperCase() : key))
-  return parts.join('+')
-}
-
-function Toggle({
-  label,
-  description,
-  checked,
-  onChange
-}: {
-  label: string
-  description: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}): React.JSX.Element {
-  return (
-    <label className="flex items-center justify-between gap-4 text-sm">
-      <span>
-        <span className="block font-medium">{label}</span>
-        <span className="block text-xs text-zinc-400">{description}</span>
-      </span>
-      <button
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 ${
-          checked ? 'bg-sky-500' : 'bg-zinc-700'
-        }`}
-      >
-        {/* left-0 anchors the knob; off = left edge, on = slid right. */}
-        <span
-          className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-[22px]' : 'translate-x-0.5'
-          }`}
-        />
-      </button>
-    </label>
   )
 }

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DictionaryTerm, HistoryEntry, Settings, StateChange } from '@shared/types'
+import type { DictionaryTerm, HistoryEntry, Settings, StateChange, UpdateStatus } from '@shared/types'
 import { IPC } from '@shared/types'
 
 const api = {
@@ -22,6 +22,11 @@ const api = {
     const handler = (_e: unknown, level: number): void => cb(level)
     ipcRenderer.on(IPC.micLevel, handler)
     return () => ipcRenderer.removeListener(IPC.micLevel, handler)
+  },
+  onOverlayPreview(cb: () => void): () => void {
+    const handler = (): void => cb()
+    ipcRenderer.on(IPC.overlayPreview, handler)
+    return () => ipcRenderer.removeListener(IPC.overlayPreview, handler)
   },
   onTranscriptReady(cb: (t: { raw: string; clean: string }) => void): () => void {
     const handler = (_e: unknown, t: { raw: string; clean: string }): void => cb(t)
@@ -51,6 +56,9 @@ const api = {
   },
   addDictionaryTerm(term: string, hint: string | null): Promise<DictionaryTerm> {
     return ipcRenderer.invoke(IPC.addDictionaryTerm, term, hint)
+  },
+  updateDictionaryTerm(id: number, term: string, hint: string | null): Promise<DictionaryTerm | null> {
+    return ipcRenderer.invoke(IPC.updateDictionaryTerm, id, term, hint)
   },
   removeDictionaryTerm(id: number): Promise<void> {
     return ipcRenderer.invoke(IPC.removeDictionaryTerm, id)
@@ -95,6 +103,21 @@ const api = {
   },
   downloadSttModel(name: string): Promise<string> {
     return ipcRenderer.invoke(IPC.downloadSttModel, name)
+  },
+  getDisplays(): Promise<import('@shared/types').DisplayInfo[]> {
+    return ipcRenderer.invoke(IPC.getDisplays)
+  },
+  getDebugInfo(): Promise<import('@shared/types').DebugInfo> {
+    return ipcRenderer.invoke(IPC.getDebugInfo)
+  },
+  openDebugWindow(): Promise<void> {
+    return ipcRenderer.invoke(IPC.openDebugWindow)
+  },
+  getUpdateStatus(): Promise<UpdateStatus> {
+    return ipcRenderer.invoke(IPC.getUpdateStatus)
+  },
+  checkForUpdates(): Promise<UpdateStatus> {
+    return ipcRenderer.invoke(IPC.checkForUpdates)
   },
   onModelDownloadProgress(cb: (p: { name: string; pct: number }) => void): () => void {
     const handler = (_e: unknown, p: { name: string; pct: number }): void => cb(p)

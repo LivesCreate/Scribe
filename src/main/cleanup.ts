@@ -65,9 +65,46 @@ export async function cleanup(input: CleanupInput): Promise<string> {
  */
 export function postProcess(text: string, style: WritingStyle, dictionary: DictionaryTerm[]): string {
   return applyDictionaryShorthand(
-    stripAbandonedNaming(applyStyleRules(normalizeListMarkers(text), style)),
+    stripDanglingOrdinal(stripAbandonedNaming(applyStyleRules(stripDashes(normalizeListMarkers(text)), style))),
     dictionary
   )
+}
+
+const ORDINAL = 'first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|finally|lastly|next'
+
+/**
+ * Deterministic backstop: a speaker who announces the next item ("...and third")
+ * but trails off leaves a dangling ordinal with no item. Drop it — but ONLY when
+ * it stands alone as its own trailing sentence/line (preceded by a sentence break
+ * or newline), so legitimate content like "I ranked third." is never touched.
+ */
+export function stripDanglingOrdinal(text: string): string {
+  const inline = text.match(new RegExp(`([.!?])\\s+(?:and\\s+)?(?:${ORDINAL})[.,!?]*\\s*$`, 'i'))
+  if (inline) return text.slice(0, inline.index).trimEnd() + (inline[1] ?? '')
+  const online = text.match(new RegExp(`\\n+[^\\S\\n]*(?:and\\s+)?(?:${ORDINAL})[.,!?]*\\s*$`, 'i'))
+  if (online) return text.slice(0, online.index).trimEnd()
+  return text
+}
+
+/**
+ * Deterministic backstop for the no-dashes contract: the user wants Wispr-style
+ * text with no em/en dashes used as punctuation. A dash used as a pause or
+ * parenthetical ("the plan — which we discussed", "wait—no") becomes a clean
+ * sentence break. Hyphens inside a single word ("well-known") have no spaces
+ * around them and bullet markers sit at line starts, so both are left alone.
+ */
+export function stripDashes(text: string): string {
+  const breakAt = (a: string, b: string): string => `${a}. ${b.toUpperCase()}`
+  return text
+    // em dash: almost always a prose pause, spaced or not.
+    .replace(/(\S)\s*—\s*(\S)/g, (_m, a: string, b: string) => breakAt(a, b))
+    // en dash / hyphen used as a dash: only when spaced (avoids ranges like 3–5
+    // and compound words), and never at a line start (preserves "- " bullets).
+    .replace(/(\S)[^\S\n]+[–-][^\S\n]+(\S)/g, (_m, a: string, b: string) => breakAt(a, b))
+    // undo a doubled terminator if the break landed right after "?"/"!"/"."
+    .replace(/([.!?])\.(\s)/g, '$1$2')
+    .replace(/[^\S\n]{2,}/g, ' ')
+    .trim()
 }
 
 /**

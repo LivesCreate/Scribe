@@ -13,7 +13,7 @@ export interface StateChange {
   detail?: string
 }
 
-export type WritingStyle = 'professional' | 'casual' | 'messaging'
+export type WritingStyle = 'professional' | 'casual' | 'messaging' | 'concise'
 
 export interface DictionaryTerm {
   id: number
@@ -39,7 +39,12 @@ export interface HistoryEntry {
 }
 
 export interface Settings {
-  hotkeyMode: 'hold' | 'toggle'
+  /**
+   * How the shortcut starts a dictation:
+   *  - 'hold'      — hold the combo, speak, release (push-to-talk)
+   *  - 'doubletap' — double-tap the combo to start; double-tap again to stop
+   */
+  hotkeyMode: 'hold' | 'doubletap'
   /** uiohook keycodes held together for push-to-talk. Default: right Ctrl. */
   holdKeycodes: number[]
   /** Human-readable name of the hold combo, e.g. "Ctrl + Win". */
@@ -69,6 +74,14 @@ export interface Settings {
   micLabel: string | null
   /** Free text the user writes about themselves; shown/edited in Your Data. */
   userProfile: string
+  /** False until the first-run welcome wizard has been completed or skipped. */
+  onboarded: boolean
+  /** Electron display id the overlay appears on; null = primary monitor. */
+  overlayDisplayId: number | null
+  /** Color palette for the main window. */
+  uiTheme: 'black' | 'blue' | 'white'
+  /** Highest app version ever run — used to warn about accidental downgrades. */
+  highestVersionRun: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -91,12 +104,26 @@ export const DEFAULT_SETTINGS: Settings = {
   bridgeToken: null,
   micDeviceId: null,
   micLabel: null,
-  userProfile: ''
+  userProfile: '',
+  onboarded: false,
+  overlayDisplayId: null,
+  uiTheme: 'black',
+  highestVersionRun: '0.0.0'
+}
+
+/** Result of the on-launch GitHub release check. */
+export interface UpdateStatus {
+  state: 'checking' | 'current' | 'available' | 'offline' | 'no-releases'
+  currentVersion: string
+  latestVersion: string | null
+  /** GitHub release page for the newest version, when one exists. */
+  url: string | null
+  checkedAt: number | null
 }
 
 /** Live hotkey diagnostics shown in Settings so "nothing happened" is debuggable. */
 export interface HotkeyStatus {
-  mode: 'hold' | 'toggle'
+  mode: 'hold' | 'doubletap'
   /** True when the hook/accelerator is actually armed and listening. */
   active: boolean
   /** Human-readable explanation of the current state (or failure). */
@@ -130,6 +157,28 @@ export interface SystemStatusInfo {
   micPermission: 'unknown' | 'granted' | 'denied'
 }
 
+/** A monitor the dictation overlay can be shown on. */
+export interface DisplayInfo {
+  id: number
+  label: string
+  primary: boolean
+}
+
+/** A live diagnostics snapshot for the debug console. */
+export interface DebugInfo {
+  version: string
+  platform: string
+  system: SystemStatusInfo
+  hotkey: HotkeyStatus
+  settings: Omit<Settings, 'cloudApiKey' | 'bridgeToken'> & {
+    cloudApiKey: string
+    bridgeToken: string
+  }
+  storageBackend: 'sqlite' | 'json-fallback'
+  displays: DisplayInfo[]
+  log: { at: number; line: string }[]
+}
+
 /** IPC channel names — single source of truth for main/preload/renderer. */
 export const IPC = {
   stateChanged: 'scribe:state-changed',
@@ -143,6 +192,7 @@ export const IPC = {
   getHistory: 'scribe:get-history',
   getDictionary: 'scribe:get-dictionary',
   addDictionaryTerm: 'scribe:add-dictionary-term',
+  updateDictionaryTerm: 'scribe:update-dictionary-term',
   removeDictionaryTerm: 'scribe:remove-dictionary-term',
   updateHistoryEntry: 'scribe:update-history-entry',
   getSystemStatus: 'scribe:get-system-status',
@@ -158,5 +208,11 @@ export const IPC = {
   downloadSttModel: 'scribe:download-stt-model',
   modelDownloadProgress: 'scribe:model-download-progress',
   deleteAllData: 'scribe:delete-all-data',
-  transcriptReady: 'scribe:transcript-ready'
+  transcriptReady: 'scribe:transcript-ready',
+  getDisplays: 'scribe:get-displays',
+  getDebugInfo: 'scribe:get-debug-info',
+  openDebugWindow: 'scribe:open-debug-window',
+  overlayPreview: 'scribe:overlay-preview',
+  getUpdateStatus: 'scribe:get-update-status',
+  checkForUpdates: 'scribe:check-for-updates'
 } as const

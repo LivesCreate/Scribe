@@ -1,8 +1,55 @@
 @import 'tailwindcss';
+/* Newsreader — a calm literary serif for headings (bundled, offline). */
+@import '@fontsource/newsreader/latin-400.css';
+@import '@fontsource/newsreader/latin-500.css';
+@import '@fontsource/newsreader/latin-600.css';
 
 /* Scribe is dark by design (never white mode): dark: variants activate via
    the .dark class on the main window root, not the OS setting. */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* Minimal, Wispr-inspired dark palette — warm near-black, hairline borders,
+   calm greys, and a high-contrast graphite accent instead of color. */
+@theme {
+  --font-serif: 'Newsreader', ui-serif, Georgia, 'Times New Roman', serif;
+
+  /* True-neutral greys (no blue undertone) so secondary text never reads
+     purple against the near-black background under Windows text rendering. */
+  --color-base: #0a0a0a; /* app background */
+  --color-surface: #161616; /* panels / cards */
+  --color-surface-2: #212121; /* insets, controls */
+  --color-line: #2c2c2c; /* hairline borders */
+
+  --color-ink: #ededed; /* primary text */
+  --color-ink-muted: #b2b2b2; /* secondary text — brighter + neutral */
+  --color-ink-faint: #808080; /* tertiary text */
+  --color-accent: #3b82f6; /* system blue — toggles, active states, primary buttons */
+}
+
+/* Switchable palettes: CSS-variable overrides on <body> (see applyUiTheme in
+   ui.tsx). "Black" is the @theme default above; blue and white re-tint every
+   token-based utility without touching component code. */
+body.theme-blue {
+  --color-base: #0a1020;
+  --color-surface: #111a2e;
+  --color-surface-2: #1a2740;
+  --color-line: #263752;
+  --color-ink: #e8ecf4;
+  --color-ink-muted: #a8b3c7;
+  --color-ink-faint: #71809b;
+  --color-accent: #3b82f6;
+}
+body.theme-white {
+  color-scheme: light;
+  --color-base: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #ececea;
+  --color-line: #dcdcda;
+  --color-ink: #191919;
+  --color-ink-muted: #5c5c5c;
+  --color-ink-faint: #8a8a8a;
+  --color-accent: #2563eb;
+}
 
 :root {
   color-scheme: dark;
@@ -21,4 +68,75 @@ body,
     sans-serif;
 }
 
+/* Serif headings get optical-size + tighter tracking for a premium feel. */
+.font-serif {
+  font-optical-sizing: auto;
+}
+
+/* Invisible scrollbars — content still scrolls via wheel, trackpad, and by
+   dragging, but the scrollbar track/thumb never paints. */
+* {
+  scrollbar-width: none; /* Firefox */
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* The overlay window is transparent; only the pill paints pixels. */
+
+/* Levitation: the pill drifts gently up and down while a separate shadow on
+   the "ground" shrinks and fades as it rises — the magnetic-float illusion.
+   The two share timing so they read as one levitating object. */
+@keyframes scribe-float {
+  0%,
+  100% {
+    transform: translateY(3px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes scribe-float-shadow {
+  0%,
+  100% {
+    transform: translateX(-50%) scaleX(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateX(-50%) scaleX(0.78);
+    opacity: 0.26;
+  }
+}
+.animate-float {
+  animation: scribe-float 3.4s ease-in-out infinite;
+}
+.animate-float-shadow {
+  animation: scribe-float-shadow 3.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-float-shadow {
+    animation: none;
+  }
+}
+
+/* Page navigation: content slides in fluidly instead of swapping instantly. */
+@keyframes scribe-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-slide-in {
+  animation: scribe-slide-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-in {
+    animation: none;
+  }
+}

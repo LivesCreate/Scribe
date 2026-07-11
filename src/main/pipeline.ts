@@ -17,7 +17,9 @@ export interface PipelineInput {
 export async function runPipeline(input: PipelineInput): Promise<void> {
   const { wav, store, machine, startedAt, onTranscript } = input
   try {
-    machine.transition('thinking')
+    // Stage labels the overlay shows so you can see exactly what Scribe is
+    // doing — not a generic "Thinking…".
+    machine.transition('thinking', 'Transcribing your speech…')
     const settings = store.getSettings()
     const dictionary = store.getDictionary()
 
@@ -33,6 +35,7 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
       clean = applyDictionaryShorthand(raw, dictionary)
     } else {
       // Stage 1 — always run the fast local cleanup (the product).
+      machine.transition('thinking', 'Cleaning up your words…')
       clean = await cleanup({ rawTranscript: raw, dictionary, style: settings.style, model: settings.cleanupModel })
 
       // Stage 2 — optional cloud double-check: a stronger model proofreads
@@ -40,7 +43,7 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
       // never make dictation feel slow; on timeout or error, keep stage 1.
       if (settings.cloudEnabled && settings.cloudProvider !== null && settings.cloudApiKey !== null) {
         // Per-use-visible notice: the overlay shows exactly where text is going.
-        machine.transition('thinking', `Double-checking with ${settings.cloudProvider} (cloud)…`)
+        machine.transition('thinking', `Checking grammar with ${settings.cloudProvider} (cloud)…`)
         try {
           clean = postProcess(
             await refineViaCloud({
@@ -59,7 +62,7 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
       }
     }
 
-    machine.transition('inserting')
+    machine.transition('inserting', 'Inserting your text…')
     await insertAtCursor(clean)
 
     const durationMs = Date.now() - startedAt

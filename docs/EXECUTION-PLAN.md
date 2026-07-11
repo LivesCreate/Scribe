@@ -1,7 +1,7 @@
-# Execution Plan — Project SCRIBE (from build-spec `so-i-want-to-staged-riddle.md`)
+# Execution Plan — Project SCRIBE (from build-spec `the build-spec`)
 
 ## Context
-The user has a complete build-spec for **SCRIBE**: a free, private, local-first voice-dictation utility (a "Wispr Flow you own"). Hold a hotkey, speak, and clean professionally-formatted text (filler removed, lists detected and terminated, dictionary words enforced) is inserted at the cursor in any app. The spec (now committed as `docs/BUILD-SPEC.md`) is the authoritative requirements document — this file is the *execution adaptation* for this specific machine. Run until finished or the usage limit is hit; **no questions unless truly blocked**. When done (and at major milestones), run `/graphify-windows` on the project folder.
+The user has a complete build-spec for **SCRIBE**: a free, private, local-first voice-dictation utility (a "Wispr Flow you own"). Hold a hotkey, speak, and clean professionally-formatted text (filler removed, lists detected and terminated, dictionary words enforced) is inserted at the cursor in any app. The spec at `docs/BUILD-SPEC.md` is the authoritative requirements document — this file is the *execution adaptation* for this specific machine. Run until finished or the usage limit is hit; **no questions unless truly blocked**. When done (and at major milestones), run `/graphify-windows` on the project folder.
 
 ## Machine findings (drives every stack decision)
 - **Have:** Node 24.14, npm 11.9, Windows 11, **RTX 3060 Laptop 6 GB** + i7-11370H + **16 GB RAM** → spec's **mid/high tier**; GPU inference viable.
@@ -17,7 +17,7 @@ The user has a complete build-spec for **SCRIBE**: a free, private, local-first 
 | Insertion | Save clipboard → set text → synthesize **Ctrl+V via `SendInput`** through **koffi** FFI (prebuilt, no compile); restore clipboard. Fallback: PowerShell SendKeys. | "Type into any app" without native compilation. |
 | Audio | `getUserMedia` + WebAudio in renderer; energy-based VAD; 16 kHz WAV to sidecar | No native deps; live level data for overlay waveform. |
 | Storage | **better-sqlite3** (has Electron prebuilds); if no prebuild for the ABI, fall back to **sql.js** (wasm) with file persistence | Spec requires local SQLite; both paths avoid MSVC. |
-| Project location | `Scribe\` (new top-level folder in the user profile) | New top-level project folder. |
+| Project location | `the project folder` | New top-level project folder. |
 
 ## Build order (spec's gated phases, adapted)
 1. **Phase 0 — Scaffold**: electron-vite + React/TS-strict/Tailwind/shadcn; state machine (`idle→listening→thinking→inserting→done/error`); frameless always-on-top overlay window; global hotkey (hold + toggle); mic capture + level meter; SQLite; **write the cleanup fixture file first** (≥10 input→output pairs incl. the grocery signature test) + vitest harness. *Gate: app launches, hotkey shows overlay, fixtures load.*
@@ -38,4 +38,4 @@ The user has a complete build-spec for **SCRIBE**: a free, private, local-first 
 ## Standing rules
 - TS `strict`, no `any`; no giant files; no `// TODO` left in a closed phase; never break privacy-default.
 - If a floor is infeasible, substitute nearest feasible option and **log it in `docs/DECISIONS.md`** — never silently lower the bar.
-- After completion (and after major phases), run **`/graphify-windows`** on the project folder so the project is queryable without re-reading chat.
+- After completion (and after major phases), run **`/graphify-windows`** on `the project folder` so the project is queryable without re-reading chat.

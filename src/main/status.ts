@@ -53,7 +53,11 @@ export async function downloadSttModel(
   const dest = join(dir, `ggml-${name}.bin`)
   if (existsSync(dest)) return dest
 
-  const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${name}.bin`
+  // Distil-Whisper models live in their own HF org; everything else ships in
+  // the whisper.cpp models repo.
+  const url = name.startsWith('distil-')
+    ? `https://huggingface.co/distil-whisper/${name}-ggml/resolve/main/ggml-${name}.bin`
+    : `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${name}.bin`
   const res = await fetch(url)
   if (!res.ok || res.body === null) throw new Error(`Model download failed: ${res.status}`)
   const total = Number(res.headers.get('content-length') ?? 0)

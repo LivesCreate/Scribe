@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-const BAR_COUNT = 14
+const BAR_COUNT = 18
 
 /**
  * Live mic level bars, drawn on canvas via rAF so updates never touch the
@@ -26,13 +26,16 @@ export function LevelBars({ level }: { level: number }): React.JSX.Element {
       const { width, height } = canvas
       ctx.clearRect(0, 0, width, height)
       const barW = width / BAR_COUNT
+      const dot = Math.max(2, barW - 3) // quiet baseline: a small round dot
       for (let i = 0; i < history.length; i++) {
-        const h = Math.max(3, (history[i] ?? 0) * height)
-        ctx.fillStyle = 'rgba(52, 211, 153, 0.9)'
-        const x = i * barW + 1
+        const h = Math.max(dot, (history[i] ?? 0) * height)
+        // Light, Wispr-style waveform: near-white, brighter as it grows.
+        const amp = Math.min(1, h / height)
+        ctx.fillStyle = `rgba(244, 244, 245, ${0.45 + amp * 0.5})`
+        const x = i * barW + (barW - dot) / 2
         const y = (height - h) / 2
         ctx.beginPath()
-        ctx.roundRect(x, y, barW - 2, h, 2)
+        ctx.roundRect(x, y, dot, h, dot / 2)
         ctx.fill()
       }
       raf = requestAnimationFrame(draw)
@@ -41,5 +44,5 @@ export function LevelBars({ level }: { level: number }): React.JSX.Element {
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  return <canvas ref={canvasRef} width={84} height={28} aria-hidden="true" />
+  return <canvas ref={canvasRef} width={120} height={24} aria-hidden="true" />
 }

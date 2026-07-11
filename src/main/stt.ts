@@ -78,7 +78,10 @@ export async function transcribe(
   const tmp = join(app.getPath('temp'), `scribe-${Date.now()}.wav`)
   await writeFile(tmp, wav)
 
-  const args = ['-m', model, '-f', tmp, '-l', 'en', '-nt', '-np', '--no-gpu']
+  // English-only models (.en variants, Distil-Whisper) pin the language; true
+  // multilingual models (large-v3-turbo) auto-detect so 99+ languages work.
+  const lang = modelName.includes('.en') || modelName.startsWith('distil-') ? 'en' : 'auto'
+  const args = ['-m', model, '-f', tmp, '-l', lang, '-nt', '-np', '--no-gpu']
   if (install.variant === 'cuda') args.pop() // keep GPU on for the CUDA build
   if (dictionary.length > 0) {
     // Bias decoding toward the user's words AND their spoken shorthands so

@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Scribe",
+    "slug": "scribe",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "scribe",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#09090b",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.livescreate.scribe"
+    },
+    "android": {
+      "package": "com.livescreate.scribe",
+      "adaptiveIcon": {
+        "backgroundColor": "#09090b",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Scribe uses the microphone only while you are dictating. Audio is sent to your own PC on your network, never to the internet."
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}

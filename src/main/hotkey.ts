@@ -47,20 +47,31 @@ function buildKeyNames(): Map<number, string> {
 }
 
 /**
- * Owns all global-hotkey behavior:
- *  - hold mode: low-level uiohook hook, multi-key combos (e.g. Ctrl + Win)
- *  - toggle mode: Electron globalShortcut accelerator
- *  - live re-apply when settings change (no app restart)
- *  - capture mode: record the next combo the user presses, for rebinding
+ * Max gap between the two taps of a double-tap. Measured between combo
+ * completions, so a two-key combo (Ctrl + Win) eats real time just being
+ * pressed — 650ms lands reliably for humans without inviting stray doubles.
+ */
+const DOUBLE_TAP_MS = 650
+
+/**
+ * Owns all global-hotkey behavior. There are exactly two user-facing modes,
+ * both built on the same captured combo (e.g. Ctrl + Win):
+ *  - hold mode: hold the combo to talk, release to stop.
+ *  - doubletap mode: double-tap the combo to start; double-tap again to stop.
+ * Both are driven by the low-level uiohook keyboard hook. If that hook cannot
+ * start, we fall back to a single Electron globalShortcut accelerator that
+ * toggles on one press (degraded, but better than a dead shortcut), and say so.
  */
 export class HotkeyManager {
-  mode: 'hold' | 'toggle' = 'toggle'
+  mode: 'hold' | 'doubletap' = 'hold'
   private uio: Uiohook | null = null
   private hookStarted = false
   private hookError: string | null = null
   private holdLabel = ''
   private toggleAccel = ''
-  private requestedMode: 'hold' | 'toggle' = 'toggle'
+  private usingHook = false
+  private lastComboStart = 0
+  private listening = false
   private tracker = new ComboTracker([])
   private events: HotkeyEvents
   private registeredAccelerator: string | null = null
@@ -84,15 +95,18 @@ export class HotkeyManager {
     }
     this.holdLabel = settings.holdKeyLabel
     this.toggleAccel = settings.toggleAccelerator
-    this.requestedMode = settings.hotkeyMode
+    this.mode = settings.hotkeyMode
+    this.lastComboStart = 0
 
-    if (settings.hotkeyMode === 'hold' && this.ensureHook()) {
-      this.mode = 'hold'
+    // Both modes run on the keyboard hook, keyed off the same captured combo.
+    if (this.ensureHook()) {
+      this.usingHook = true
       this.tracker.setTarget(settings.holdKeycodes)
       return
     }
 
-    this.mode = 'toggle'
+    // Hook unavailable: degrade to a single-press accelerator toggle.
+    this.usingHook = false
     this.tracker.setTarget([])
     const ok = globalShortcut.register(settings.toggleAccelerator, this.events.onToggle)
     if (ok) this.registeredAccelerator = settings.toggleAccelerator
@@ -101,30 +115,26 @@ export class HotkeyManager {
 
   /** Truthful diagnostics for the Settings page — never guess, report what is armed. */
   getStatus(): Omit<HotkeyStatus, 'lastEventType' | 'lastEventAt'> {
-    if (this.mode === 'hold') {
-      if (this.hookStarted) {
-        return { mode: 'hold', active: true, detail: `Armed — hold ${this.holdLabel} to dictate.` }
-      }
-      return {
-        mode: 'hold',
-        active: false,
-        detail: `Keyboard hook failed to start${this.hookError !== null ? ` (${this.hookError})` : ''} — hold mode cannot work.`
-      }
+    if (this.usingHook && this.hookStarted) {
+      return this.mode === 'hold'
+        ? { mode: 'hold', active: true, detail: `Armed — hold ${this.holdLabel} to dictate.` }
+        : {
+            mode: 'doubletap',
+            active: true,
+            detail: `Armed — double-tap ${this.holdLabel} to start, double-tap again to stop.`
+          }
     }
     if (this.registeredAccelerator !== null) {
-      const fellBack = this.requestedMode === 'hold'
       return {
-        mode: 'toggle',
+        mode: this.mode,
         active: true,
-        detail: fellBack
-          ? `Hold mode unavailable (keyboard hook failed${this.hookError !== null ? `: ${this.hookError}` : ''}) — fell back to toggle: press ${this.registeredAccelerator}.`
-          : `Armed — press ${this.registeredAccelerator} to start/stop.`
+        detail: `Keyboard hook unavailable${this.hookError !== null ? ` (${this.hookError})` : ''} — fell back to a single shortcut: press ${this.registeredAccelerator} to start/stop.`
       }
     }
     return {
-      mode: 'toggle',
+      mode: this.mode,
       active: false,
-      detail: `Windows refused the shortcut ${this.toggleAccel} — another app may already own it. Pick a different combo.`
+      detail: `The keyboard hook could not start${this.hookError !== null ? ` (${this.hookError})` : ''} and Windows refused the fallback shortcut ${this.toggleAccel}.`
     }
   }
 
@@ -191,9 +201,32 @@ export class HotkeyManager {
       if (!this.capture.collected.includes(code)) this.capture.collected.push(code)
       return
     }
-    if (this.mode === 'hold' && this.tracker.keyDown(code) === 'start') {
+    if (this.tracker.keyDown(code) !== 'start') return
+    if (this.mode === 'hold') {
       this.events.onPressStart()
+      return
     }
+    // doubletap: it takes a double-tap to START (so a stray press never begins
+    // a dictation), but only a SINGLE tap to STOP once you're already recording
+    // — tap once and Scribe finalizes and cleans up. (Wispr-style.)
+    if (this.listening) {
+      this.lastComboStart = 0
+      this.events.onToggle()
+      return
+    }
+    const now = Date.now()
+    if (now - this.lastComboStart <= DOUBLE_TAP_MS) {
+      this.lastComboStart = 0
+      this.events.onToggle()
+    } else {
+      this.lastComboStart = now
+    }
+  }
+
+  /** Main tells us when a dictation is live, so doubletap can stop on one tap. */
+  setListening(active: boolean): void {
+    this.listening = active
+    if (!active) this.lastComboStart = 0
   }
 
   private onKeyUp(code: number): void {
@@ -204,7 +237,9 @@ export class HotkeyManager {
       resolve(collected.length > 0 ? this.toCombo(collected) : null)
       return
     }
-    if (this.mode === 'hold' && this.tracker.keyUp(code) === 'end') {
+    // keyUp always feeds the tracker so the combo can re-activate on the next
+    // press (needed for both the hold release and the second double-tap).
+    if (this.tracker.keyUp(code) === 'end' && this.mode === 'hold') {
       this.events.onPressEnd()
     }
   }

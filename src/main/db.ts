@@ -4,12 +4,23 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { DictionaryTerm, HistoryEntry, Settings, WritingStyle } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
 
+/**
+ * Forward-migrates settings loaded from disk so old saved values keep working
+ * after a schema change. Currently: the retired single-tap 'toggle' mode maps
+ * to the new 'doubletap' mode (both are "tap the combo" rather than "hold").
+ */
+function migrateSettings(s: Settings): Settings {
+  if ((s.hotkeyMode as string) === 'toggle') s.hotkeyMode = 'doubletap'
+  return s
+}
+
 export interface ScribeStore {
   readonly backend: 'sqlite' | 'json-fallback'
   getSettings(): Settings
   setSettings(patch: Partial<Settings>): Settings
   getDictionary(): DictionaryTerm[]
   addDictionaryTerm(term: string, hint: string | null, source: DictionaryTerm['source']): DictionaryTerm
+  updateDictionaryTerm(id: number, term: string, hint: string | null): DictionaryTerm | null
   removeDictionaryTerm(id: number): void
   addHistory(raw: string, clean: string, style: WritingStyle, durationMs: number): void
   getHistory(limit: number): HistoryEntry[]
@@ -59,7 +70,7 @@ class SqliteStore implements ScribeStore {
     }[]
     const stored: Record<string, unknown> = {}
     for (const r of rows) stored[r.key] = JSON.parse(r.value)
-    return { ...DEFAULT_SETTINGS, ...stored } as Settings
+    return migrateSettings({ ...DEFAULT_SETTINGS, ...stored } as Settings)
   }
 
   setSettings(patch: Partial<Settings>): Settings {
@@ -101,6 +112,22 @@ class SqliteStore implements ScribeStore {
     }
   }
 
+  updateDictionaryTerm(id: number, term: string, hint: string | null): DictionaryTerm | null {
+    const info = this.db
+      .prepare('UPDATE dictionary SET term = ?, hint = ? WHERE id = ? RETURNING id, term, hint, source, created_at')
+      .get(term, hint, id) as
+      | { id: number; term: string; hint: string | null; source: string; created_at: string }
+      | undefined
+    if (info === undefined) return null
+    return {
+      id: info.id,
+      term: info.term,
+      hint: info.hint,
+      source: info.source === 'auto-correction' ? 'auto-correction' : 'manual',
+      createdAt: info.created_at
+    }
+  }
+
   removeDictionaryTerm(id: number): void {
     this.db.prepare('DELETE FROM dictionary WHERE id = ?').run(id)
   }
@@ -128,7 +155,7 @@ class SqliteStore implements ScribeStore {
       id: r.id,
       rawTranscript: r.raw_transcript,
       cleanText: r.clean_text,
-      style: (['professional', 'casual', 'messaging'].includes(r.style) ? r.style : 'professional') as WritingStyle,
+      style: (['professional', 'casual', 'messaging', 'concise'].includes(r.style) ? r.style : 'professional') as WritingStyle,
       durationMs: r.duration_ms,
       createdAt: r.created_at
     }))
@@ -145,7 +172,7 @@ class SqliteStore implements ScribeStore {
       id: r.id,
       rawTranscript: r.raw_transcript,
       cleanText: r.clean_text,
-      style: (['professional', 'casual', 'messaging'].includes(r.style) ? r.style : 'professional') as WritingStyle,
+      style: (['professional', 'casual', 'messaging', 'concise'].includes(r.style) ? r.style : 'professional') as WritingStyle,
       durationMs: r.duration_ms,
       createdAt: r.created_at
     }
@@ -187,7 +214,7 @@ class JsonStore implements ScribeStore {
   }
 
   getSettings(): Settings {
-    return { ...DEFAULT_SETTINGS, ...this.data.settings }
+    return migrateSettings({ ...DEFAULT_SETTINGS, ...this.data.settings })
   }
 
   setSettings(patch: Partial<Settings>): Settings {
@@ -215,6 +242,15 @@ class JsonStore implements ScribeStore {
       createdAt: new Date().toISOString()
     }
     this.data.dictionary.push(entry)
+    this.persist()
+    return entry
+  }
+
+  updateDictionaryTerm(id: number, term: string, hint: string | null): DictionaryTerm | null {
+    const entry = this.data.dictionary.find((t) => t.id === id)
+    if (!entry) return null
+    entry.term = term
+    entry.hint = hint
     this.persist()
     return entry
   }

@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react'
+import type { Settings } from '@shared/types'
 import { HomePage } from './pages/HomePage'
 import { DictionaryPage } from './pages/DictionaryPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { DataPage } from './pages/DataPage'
-import { BookIcon, ClockIcon, DatabaseIcon, GearIcon, HomeIcon, MicIcon } from './Icons'
+import { Onboarding } from './Onboarding'
+import { BookIcon, DatabaseIcon, GearIcon, HomeIcon, MicIcon, PenIcon } from './Icons'
+import { CURRENT_VERSION } from '@shared/changelog'
+import { applyUiTheme } from './ui'
 import { Recorder } from '../audio/recorder'
 
 /**
@@ -51,58 +55,75 @@ type Page = 'home' | 'dictionary' | 'history' | 'data' | 'settings'
 
 const NAV: { id: Page; label: string; icon: (p: { className?: string }) => React.JSX.Element }[] = [
   { id: 'home', label: 'Home', icon: HomeIcon },
-  { id: 'dictionary', label: 'Dictionary', icon: BookIcon },
-  { id: 'history', label: 'History', icon: ClockIcon },
+  { id: 'dictionary', label: 'Dictionary', icon: PenIcon },
+  // The book represents your history logs.
+  { id: 'history', label: 'History', icon: BookIcon },
   { id: 'data', label: 'Your data', icon: DatabaseIcon },
   { id: 'settings', label: 'Settings', icon: GearIcon }
 ]
 
 export function MainWindow(): React.JSX.Element {
   const [page, setPage] = useState<Page>('home')
+  const [settings, setSettings] = useState<Settings | null>(null)
   useRecorderBridge()
 
+  useEffect(() => {
+    void window.scribe.getSettings().then((s) => {
+      setSettings(s)
+      applyUiTheme(s.uiTheme)
+    })
+  }, [])
+
   return (
-    <div className="dark flex min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="dark flex h-screen overflow-hidden bg-base text-ink">
+      {settings !== null && !settings.onboarded && (
+        <Onboarding
+          settings={settings}
+          onDone={() => setSettings((s) => (s !== null ? { ...s, onboarded: true } : s))}
+        />
+      )}
       <nav
-        className="flex w-52 shrink-0 flex-col gap-1 border-r border-zinc-800 bg-zinc-900/80 p-4"
+        className="flex w-56 shrink-0 flex-col gap-0.5 border-r border-line bg-surface px-3 py-5"
         aria-label="Main navigation"
       >
-        <div className="mb-5 flex items-center gap-2.5 px-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-violet-600 text-white shadow-lg shadow-sky-500/20">
-            <MicIcon className="h-4.5 w-4.5" />
+        <div className="mb-6 flex items-center gap-2.5 px-2">
+          {/* The signature blue→purple gradient mark. */}
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-violet-600 text-white shadow-lg shadow-sky-500/20">
+            <MicIcon className="h-4 w-4" />
           </span>
-          <div>
-            <span className="block text-base font-semibold leading-tight tracking-tight">Scribe</span>
-            <span className="block text-[11px] text-zinc-500">Private dictation</span>
-          </div>
+          <span className="font-serif text-xl leading-none text-ink">Scribe</span>
         </div>
         {NAV.map((item) => (
           <button
             key={item.id}
             onClick={() => setPage(item.id)}
             aria-current={page === item.id ? 'page' : undefined}
-            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 ${
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-faint ${
               page === item.id
-                ? 'bg-zinc-800 text-zinc-50'
-                : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                ? 'bg-surface-2 text-ink'
+                : 'text-ink-muted hover:bg-surface-2/60 hover:text-ink'
             }`}
           >
-            <item.icon className={`h-4 w-4 ${page === item.id ? 'text-sky-400' : 'text-zinc-500'}`} />
+            <item.icon className={`h-4 w-4 ${page === item.id ? 'text-ink' : 'text-ink-faint'}`} />
             {item.label}
           </button>
         ))}
-        <div className="mt-auto rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <p className="text-[11px] leading-relaxed text-zinc-500">
+        <div className="mt-auto px-2 pt-4">
+          <p className="text-[11px] leading-relaxed text-ink-faint">
             100% local. No subscription, no word limits, no cloud.
           </p>
+          <p className="mt-2.5 text-[11px] text-ink-faint">Scribe v{CURRENT_VERSION}</p>
         </div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto px-10 py-10">
-        {page === 'home' && <HomePage />}
-        {page === 'dictionary' && <DictionaryPage />}
-        {page === 'history' && <HistoryPage />}
-        {page === 'data' && <DataPage />}
-        {page === 'settings' && <SettingsPage />}
+        {/* key={page} remounts the wrapper so each view slides in fluidly. */}
+        <div key={page} className="animate-slide-in">
+          {page === 'home' && <HomePage />}
+          {page === 'dictionary' && <DictionaryPage />}
+          {page === 'history' && <HistoryPage />}
+          {page === 'data' && <DataPage />}
+          {page === 'settings' && <SettingsPage />}
+        </div>
       </main>
     </div>
   )

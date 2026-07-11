@@ -3,6 +3,7 @@ import { networkInterfaces } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { transcribe } from './stt'
 import { cleanup } from './cleanup'
+import { ensureWav16k } from './transcode'
 import { PWA_HTML } from './bridgePage'
 import type { ScribeStore } from './db'
 import type { WritingStyle } from '@shared/types'
@@ -92,15 +93,24 @@ async function handle(
   if (req.method === 'POST' && url.pathname === '/dictate') {
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(chunk as Buffer)
-    const wav = Buffer.concat(chunks)
-    if (wav.byteLength < 100) {
+    const uploaded = Buffer.concat(chunks)
+    if (uploaded.byteLength < 100) {
       sendJson(res, 400, { error: 'empty audio' })
+      return
+    }
+    // The web page sends a ready 16 kHz WAV; the mobile app sends compressed
+    // audio (.m4a). Normalize either to the WAV Whisper needs, locally.
+    let wav: Buffer
+    try {
+      wav = await ensureWav16k(uploaded)
+    } catch (err) {
+      sendJson(res, 415, { error: err instanceof Error ? err.message : 'could not decode audio' })
       return
     }
     const settings = store.getSettings()
     const dictionary = store.getDictionary()
     const styleParam = url.searchParams.get('style')
-    const style: WritingStyle = ['professional', 'casual', 'messaging'].includes(styleParam ?? '')
+    const style: WritingStyle = ['professional', 'casual', 'messaging', 'concise'].includes(styleParam ?? '')
       ? (styleParam as WritingStyle)
       : settings.style
     const stt = await transcribe(wav, settings.sttModel, dictionary)
