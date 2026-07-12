@@ -1,5 +1,7 @@
 # Scribe
 
+> ⚠️ **Project status: unfinished.** Scribe works, but this project is no longer being developed and **will not receive further updates**. The latest (final) installer is on the [Releases page](../../releases).
+
 **Speak freely; get text you'd have been proud to type.** A free, private, local-first voice-dictation utility — a Wispr Flow you own. No subscription, no word caps, no cloud.
 
 *Windows-first (macOS/Linux untested) · MIT licensed · 100% local by default*

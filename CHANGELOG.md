@@ -11,6 +11,11 @@ Scribe uses **MAJOR.MINOR.PATCH** version numbers:
 <!-- This file mirrors src/shared/changelog.ts, which also powers the in-app
      "What's new" panel in Settings. Update that file and keep this in sync. -->
 
+## 1.7.1 — 2026-07-11 · Final release
+
+- Added a clear notice — in the app sidebar, in Settings → Updates, and on the GitHub page — that Scribe is an unfinished project and will not receive further updates.
+- This is the final version. Everything keeps working exactly as it does today: 100% local, no subscription, no cloud.
+
 ## 1.7.0 — 2026-07-11 · A real Windows installer & a data-respecting uninstaller
 
 - Setup now uses the standard Windows install wizard — welcome, pick a location, progress, finish — instead of a bare progress window.

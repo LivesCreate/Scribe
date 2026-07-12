@@ -178,7 +178,10 @@ export function SettingsPage(): React.JSX.Element {
     <div className="mx-auto max-w-2xl space-y-8">
       <PageTitle title="Settings" subtitle="Everything applies instantly — no save button." />
 
-      <SettingGroup title="Updates" intro="On every launch Scribe compares itself to the newest GitHub release. Downgrades are detected and warned about.">
+      <SettingGroup
+        title="Updates"
+        intro="Scribe is an unfinished project and will not receive further updates. This check still compares your install against the final release on GitHub, and downgrades are detected and warned about."
+      >
         <SettingRow
           label="Update check"
           description={

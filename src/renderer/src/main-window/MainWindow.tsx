@@ -113,6 +113,9 @@ export function MainWindow(): React.JSX.Element {
             100% local. No subscription, no word limits, no cloud.
           </p>
           <p className="mt-2.5 text-[11px] text-ink-faint">Scribe v{CURRENT_VERSION}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+            Unfinished project — no further updates.
+          </p>
         </div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto px-10 py-10">

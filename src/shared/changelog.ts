@@ -19,6 +19,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.7.1',
+    date: '2026-07-11',
+    title: 'Final release',
+    changes: [
+      'Added a clear notice — in the app sidebar, in Settings → Updates, and on the GitHub page — that Scribe is an unfinished project and will not receive further updates.',
+      'This is the final version. Everything keeps working exactly as it does today: 100% local, no subscription, no cloud.'
+    ]
+  },
+  {
     version: '1.7.0',
     date: '2026-07-11',
     title: 'A real Windows installer & a data-respecting uninstaller',
