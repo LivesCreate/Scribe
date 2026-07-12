@@ -37,7 +37,14 @@ win:
     - nsis
   icon: resources/icon-256.png
 nsis:
-  oneClick: true
+  # Standard Windows install/uninstall wizard (not the bare one-click window):
+  # welcome page, install location, progress, finish — like most Windows apps.
+  oneClick: false
   perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  # App data removal is handled conditionally in installer.nsh: a real
+  # uninstall asks to back the data up first; updates never touch it.
   deleteAppDataOnUninstall: false
+  include: build/installer.nsh
 npmRebuild: false

@@ -19,6 +19,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.7.0',
+    date: '2026-07-11',
+    title: 'A real Windows installer & a data-respecting uninstaller',
+    changes: [
+      'Setup now uses the standard Windows install wizard — welcome, pick a location, progress, finish — instead of a bare progress window.',
+      'Uninstalling from Windows Settings now shows the normal uninstall flow, and before deleting anything it asks whether to save your Scribe data (dictations, dictionary, settings) to a "Scribe Backup" folder on your Desktop. Say No and everything is removed instantly.',
+      'Updates never touch your data — the backup question only appears on a real uninstall.',
+      'The installer now always creates the Desktop shortcut.'
+    ]
+  },
+  {
     version: '1.6.4',
     date: '2026-07-11',
     title: 'Setup checklist re-checks itself',

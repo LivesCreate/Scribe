@@ -1,6 +1,6 @@
 {
   "name": "scribe",
-  "version": "1.6.4",
+  "version": "1.7.0",
   "description": "SCRIBE — a free, private, local-first voice-dictation utility. Speak freely; get text you'd have been proud to type.",
   "main": "out/main/index.js",
   "author": "LivesCreate",

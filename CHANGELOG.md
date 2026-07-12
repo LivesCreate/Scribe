@@ -11,6 +11,13 @@ Scribe uses **MAJOR.MINOR.PATCH** version numbers:
 <!-- This file mirrors src/shared/changelog.ts, which also powers the in-app
      "What's new" panel in Settings. Update that file and keep this in sync. -->
 
+## 1.7.0 — 2026-07-11 · A real Windows installer & a data-respecting uninstaller
+
+- Setup now uses the standard Windows install wizard — welcome, pick a location, progress, finish — instead of a bare progress window.
+- Uninstalling from Windows Settings now shows the normal uninstall flow, and before deleting anything it asks whether to save your Scribe data (dictations, dictionary, settings) to a "Scribe Backup" folder on your Desktop. Say No and everything is removed instantly.
+- Updates never touch your data — the backup question only appears on a real uninstall.
+- The installer now always creates the Desktop shortcut.
+
 ## 1.6.4 — 2026-07-11 · Setup checklist re-checks itself
 
 - The "Finish setting up" checklist now re-checks automatically every few seconds and clears itself the moment everything is ready. Before, it took a snapshot on launch — so if Ollama was still starting up (common right after an update), it wrongly showed the cleanup engine as missing until you clicked Re-check.
